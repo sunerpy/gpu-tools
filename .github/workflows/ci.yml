@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go-build-test:
+    name: Go Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: CGO_ENABLED=0 go build -v ./...
+
+      - name: Run Tests
+        run: CGO_ENABLED=1 go test ./... -count=1 -race -covermode=atomic -coverprofile=coverage.out
+
+      - name: Coverage Gate
+        run: make coverage-gate
+
+      - name: Coverage Exclusion Parity
+        run: make coverage-parity
+
+      - name: Upload Coverage to Codecov
+        if: ${{ !env.ACT }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload Coverage
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: coverage.out
+          retention-days: 7
+
+  go-lint:
+    name: Go Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install golangci-lint from source
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - name: Run golangci-lint
+        run: golangci-lint run --timeout=5m
+
+  go-security:
+    name: Go Security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Go formatters
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          go install mvdan.cc/gofumpt@latest
+
+      - name: Run make fmt
+        run: make fmt
+
+      - name: Check for formatting changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Code is not formatted. Please run 'make fmt' locally and commit the changes."
+            echo ""
+            echo "Changed files:"
+            git status --porcelain
+            echo ""
+            echo "Diff:"
+            git diff --color=always
+            exit 1
+          fi
+          echo "All code is properly formatted."
+
+  ci-success:
+    name: CI Success
+    needs: [go-build-test, go-lint, go-security, format-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.go-build-test.result }}" != "success" ]]; then
+            echo "go-build-test failed"
+            exit 1
+          fi
+          if [[ "${{ needs.go-lint.result }}" != "success" ]]; then
+            echo "go-lint failed"
+            exit 1
+          fi
+          if [[ "${{ needs.go-security.result }}" != "success" ]]; then
+            echo "go-security failed"
+            exit 1
+          fi
+          if [[ "${{ needs.format-check.result }}" != "success" ]]; then
+            echo "format-check failed"
+            exit 1
+          fi
+          echo "All CI checks passed!"
