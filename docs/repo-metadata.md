@@ -7,7 +7,7 @@ This document records the exact `gh` commands to configure repository metadata f
 Set the repository description to clearly communicate the project's purpose:
 
 ```bash
-gh repo edit sunerpy/gpu-tools --description "Pure-Go NVIDIA GPU infrastructure CLI: detect, report, tuning advice, benchmark — single static binary, no cgo"
+gh repo edit sunerpy/gpu-tools --description "Pure-Go NVIDIA GPU infrastructure CLI: detect, report, tuning advice, benchmark — single self-contained binary, no cgo"
 ```
 
 ## Repository Topics
