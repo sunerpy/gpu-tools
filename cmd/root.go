@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sunerpy/gpu-tools/core"
+	_ "github.com/sunerpy/gpu-tools/internal/gpu/nvidiasmi"
+	_ "github.com/sunerpy/gpu-tools/internal/gpu/nvml"
 )
 
 const (
