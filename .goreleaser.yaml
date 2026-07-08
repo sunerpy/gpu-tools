@@ -1,0 +1,49 @@
+version: 2
+
+project_name: gpu-tools
+
+builds:
+  - id: gpu-tools
+    main: .
+    binary: gpu-tools
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/sunerpy/gpu-tools/version.Version={{.Version}}
+        -X github.com/sunerpy/gpu-tools/version.CommitID={{.Commit}}
+        -X github.com/sunerpy/gpu-tools/version.BuildTime={{.Date}}
+        -X github.com/sunerpy/gpu-tools/version.BuildOS={{.Os}}
+        -X github.com/sunerpy/gpu-tools/version.BuildArch={{.Arch}}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: sunerpy
+    name: gpu-tools
+  draft: true
+  prerelease: auto
+  mode: replace
