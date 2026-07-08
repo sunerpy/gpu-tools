@@ -1,0 +1,61 @@
+{
+  "Host": "gpu-host-01",
+  "Timestamp": "2026-01-02T03:04:05Z",
+  "Backend": "nvml",
+  "Devices": [
+    {
+      "Index": 0,
+      "UUID": "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0000",
+      "Name": "NVIDIA RTX 6000 Ada",
+      "MemoryTotal": 25769803776,
+      "MemoryUsed": 2147483648,
+      "Temperature": 63,
+      "PowerDraw": 215500,
+      "PowerLimit": 300000,
+      "ClockGraphics": 2100,
+      "ClockMem": 5001,
+      "UtilizationGPU": 72,
+      "UtilizationMem": 41,
+      "ThrottleReasons": [
+        "sw_power_cap",
+        "gpu_idle"
+      ],
+      "ECCEnabled": true,
+      "MIGEnabled": false,
+      "MIGDevices": null,
+      "PState": "P0",
+      "FanSpeed": 68,
+      "DriverVersion": "555.42.02",
+      "CudaVersion": "12.5"
+    },
+    {
+      "Index": 1,
+      "UUID": "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001",
+      "Name": "NVIDIA L4",
+      "MemoryTotal": 25769803776,
+      "MemoryUsed": 1073741824,
+      "Temperature": 51,
+      "PowerDraw": 72000,
+      "PowerLimit": 72000,
+      "ClockGraphics": 1590,
+      "ClockMem": 6251,
+      "UtilizationGPU": 15,
+      "UtilizationMem": 8,
+      "ThrottleReasons": [],
+      "ECCEnabled": false,
+      "MIGEnabled": true,
+      "MIGDevices": [
+        {
+          "GIID": 3,
+          "CIID": 7,
+          "UUID": "MIG-GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001/3/7",
+          "MemoryTotal": 5368709120
+        }
+      ],
+      "PState": "P8",
+      "FanSpeed": null,
+      "DriverVersion": "555.42.02",
+      "CudaVersion": "12.5"
+    }
+  ]
+}
