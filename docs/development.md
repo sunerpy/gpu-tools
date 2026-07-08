@@ -1,12 +1,12 @@
 # 开发指南
 
 本项目是 Go CLI，模块名为 `github.com/sunerpy/gpu-tools`，目标 Go 版本为 `1.26.4`。
-发布构建使用 `CGO_ENABLED=0`，保证单个静态二进制交付。
+发布构建使用 `CGO_ENABLED=0`，交付单一自包含二进制；构建无需 C 工具链，但 purego NVML 会通过系统动态加载器在运行时加载 NVML，因此并非完全静态链接。
 
 ## 常用命令
 
 ```bash
-# 构建本机静态二进制到 dist/gpu-tools。
+# 构建本机二进制到 dist/gpu-tools。
 make build
 
 # 运行带 race detector 和 atomic coverage 的测试。
