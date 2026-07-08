@@ -1,0 +1,6 @@
+.codegraph
+.kiro
+.omo
+dist/
+coverage.out
+*.test
