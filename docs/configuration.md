@@ -70,4 +70,6 @@ gpu-tools --config ./config.yaml config show
 - nvidia-smi 后端需要可执行的 `nvidia-smi`。
 - 无可用后端时，`detect`、`report`、`tune` 会输出 `no NVIDIA GPU detected` 并返回退出码 `1`。
 
-构建本项目不需要 NVIDIA Driver；发布二进制使用 `CGO_ENABLED=0`。
+构建本项目不需要 NVIDIA Driver；发布二进制使用 `CGO_ENABLED=0`，构建无需 C 工具链。NVML
+后端通过系统动态加载器在运行时 `dlopen` NVML，因此并非完全静态链接；纯 musl（Alpine）不支持
+NVML 后端（可回退 `nvidia-smi`）。

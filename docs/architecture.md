@@ -1,7 +1,7 @@
 # 架构说明
 
 `gpu-tools` 是面向 NVIDIA GPU 基础设施的纯 Go CLI。核心设计目标是：优先拿到真实 GPU 数据，
-但在缺少驱动、库或 GPU 的主机上也能静态构建、启动并友好失败。
+但在缺少驱动、库或 GPU 的主机上也能用 `CGO_ENABLED=0` 构建、启动并友好失败。
 
 ## 三层 Collector 路线
 
@@ -25,8 +25,10 @@
 
 ## 为什么 purego + `CGO_ENABLED=0`
 
-- **可移植性**：发布产物是单个静态二进制，覆盖 Linux、macOS、Windows 的 `amd64` / `arm64`。
-- **部署简单**：不要求用户在构建阶段安装 CUDA 或 NVML 头文件。
+- **可移植性**：发布产物是单一自包含二进制、无 cgo，覆盖 Linux、macOS、Windows 的 `amd64` / `arm64`，并可跨 glibc 发行版运行。
+- **部署简单**：构建阶段不需要 C 工具链、CUDA 或 NVML 头文件。
+- **真实边界**：purego NVML 通过系统动态加载器在运行时 `dlopen` `libnvidia-ml.so.1`，因此并非完全静态链接；`readelf -d` 可见 NEEDED `libdl` / `libc` / `libpthread`，真实 GPU 数据仍依赖系统加载器和 NVIDIA Driver。
+- **musl 取舍**：纯 musl（Alpine）不支持 NVML 后端；如环境提供 `nvidia-smi`，可回退到 nvidia-smi 后端。
 - **优雅降级**：运行期再动态检查 NVML / `nvidia-smi`；没有 GPU 或驱动时返回清晰错误，而不是构建失败。
 - **CI 友好**：CI 可以在普通 runner 上构建和测试大部分逻辑；真实 GPU 数据只在有 NVIDIA Driver 的主机上可用。
 

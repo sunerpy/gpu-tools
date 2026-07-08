@@ -32,7 +32,8 @@ benchmark tool "<tool>" not installed, install it and retry
 
 - NVML 后端需要主机能动态加载 NVIDIA Management Library。
 - nvidia-smi 后端需要可执行的 `nvidia-smi`。
-- 无 Driver 的主机仍可构建静态二进制，并运行不依赖 GPU 的命令。
+- 无 Driver 的主机仍可构建 `CGO_ENABLED=0` 产物，并运行不依赖 GPU 的命令。
+- purego NVML 通过系统动态加载器在运行时 `dlopen` NVML，因此并非完全静态链接；纯 musl（Alpine）不支持 NVML 后端（可回退 `nvidia-smi`）。
 
 ## benchmark 需要 root 吗？
 
@@ -41,7 +42,7 @@ benchmark tool "<tool>" not installed, install it and retry
 
 ## v1 支持 Docker 吗？
 
-不支持 Docker 作为一等交付目标。v1 的主要交付形态是 GitHub Release 中的单个静态二进制。
+不支持 Docker 作为一等交付目标。v1 的主要交付形态是 GitHub Release 中的单一自包含二进制：无 cgo、构建无需 C 工具链、跨 glibc 发行版可移植，但并非完全静态链接。
 
 如果你自行放入容器运行，仍需要把 NVIDIA Driver / runtime 能力正确暴露给容器；这不是 v1 的内置流程。
 
