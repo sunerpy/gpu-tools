@@ -1,7 +1,7 @@
 # gpu-tools
 
 > Pure-Go NVIDIA GPU infrastructure CLI for detect, report, tuning advice, and
-> benchmark workflows — one static binary, no cgo.
+> benchmark workflows — single self-contained binary, no cgo, portable across glibc distributions.
 
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/)
 [![License MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -107,9 +107,11 @@ available, commands fail gracefully with `no NVIDIA GPU detected` and exit code
 - A recent Go toolchain is required only when building from source.
 - Runtime GPU data requires an installed NVIDIA driver and either NVML or
   `nvidia-smi` on the host.
-- The binary itself is pure Go and built with `CGO_ENABLED=0`; it can build and
-  start on hosts without NVIDIA GPUs, then degrades with a friendly error when
-  real GPU data is requested.
+- The binary itself is pure Go and built with `CGO_ENABLED=0`; no C toolchain is
+  needed to build it, and it can start on hosts without NVIDIA GPUs.
+- The purego NVML backend loads NVML via the system dynamic loader at runtime,
+  so the binary is not fully static and requires the system loader plus an
+  NVIDIA driver for real GPU data.
 - Benchmarks use external tools (`gpu-burn`, `nvbandwidth`, or `bandwidthTest`);
   some tools may require elevated privileges depending on the environment.
 

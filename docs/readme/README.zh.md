@@ -1,6 +1,6 @@
 # gpu-tools
 
-> 纯 Go NVIDIA GPU 基础设施 CLI，覆盖检测、报告、调优建议和基准测试；单个静态二进制，无 cgo。
+> 纯 Go NVIDIA GPU 基础设施 CLI，覆盖检测、报告、调优建议和基准测试；单一自包含二进制、无 cgo、跨 glibc 发行版可移植。
 
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/)
 [![License MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../../LICENSE)
@@ -91,7 +91,7 @@ gpu-tools --config ./config.yaml config show
 
 `gpu-tools` v1 仅支持 NVIDIA，并通过 `--backend auto|nvml|nvidia-smi` 选择采集器：
 
-1. **purego NVML**（`nvml`）：主后端；无需 cgo，动态加载 NVML。
+1. **purego NVML**（`nvml`）：主后端；无需 cgo，通过系统动态加载器在运行时 `dlopen` NVML。
 2. **nvidia-smi**（`nvidia-smi`）：回退后端；调用 `nvidia-smi` 并解析 CSV。
 3. **DCGM**：延期实现；v1 未包含。
 
@@ -103,8 +103,8 @@ gpu-tools --config ./config.yaml config show
 
 - 只有从源码构建时才需要 Go 工具链。
 - 真实 GPU 数据需要主机安装 NVIDIA Driver，并可访问 NVML 或 `nvidia-smi`。
-- 二进制本身是纯 Go，并以 `CGO_ENABLED=0` 构建；在无 NVIDIA GPU 的主机上也能构建和启动，
-  但请求真实 GPU 数据时会友好降级报错。
+- 二进制本身是纯 Go，并以 `CGO_ENABLED=0` 构建；构建无需 C 工具链，在无 NVIDIA GPU 的主机上也能启动。
+- purego NVML 后端通过系统动态加载器在运行时 `dlopen` NVML，因此并非完全静态链接；真实 GPU 数据仍需要系统加载器和 NVIDIA Driver，纯 musl（Alpine）不支持 NVML 后端（可回退 `nvidia-smi`）。
 - 基准测试依赖外部工具（`gpu-burn`、`nvbandwidth` 或 `bandwidthTest`）；部分工具可能需要更高权限。
 
 ## LLM / Agent 使用
