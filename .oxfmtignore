@@ -1,0 +1,16 @@
+# oxfmt formats YAML / JSON / Markdown. Exclude files that are generated,
+# vendored, tool-owned, or explicitly outside this task's editable surface.
+
+# Tool-owned changelogs / release metadata
+CHANGELOG.md
+.release-please-manifest.json
+
+# Build and vendored output
+dist/
+vendor/
+
+# OMO working state and agent/index internals
+.omo/
+.git/
+.codegraph/
+.kiro/

@@ -1,0 +1,59 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - github.com/sunerpy/gpu-tools
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - bodyclose
+
+  settings:
+    govet:
+      enable:
+        - shadow
+      disable:
+        - fieldalignment
+
+    misspell:
+      locale: US
+
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+          - unused
+
+      - path: vendor/
+        linters:
+          - all
+
+      - path: internal/gpu/nvml/purego_lib\.go
+        linters:
+          - unused
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
