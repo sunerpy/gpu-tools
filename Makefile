@@ -24,12 +24,13 @@ OXFMT_IGNORE := --ignore-path "$(PROJECT_ROOT)/.oxfmtignore"
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build build-binaries fmt fmt-go fmt-oxfmt fmt-check lint test coverage coverage-gate coverage-parity clean
+.PHONY: help build build-binaries build-check fmt fmt-go fmt-oxfmt fmt-check lint test coverage coverage-gate coverage-parity clean
 
 help:
 	@echo "Available targets:"
 	@echo "  build          Build static local binary into dist/gpu-tools"
 	@echo "  build-binaries Build static binaries for $(PLATFORMS)"
+	@echo "  build-check    Cross-compile-check all $(PLATFORMS) without writing binaries"
 	@echo "  fmt            Format Go and YAML/JSON/Markdown files"
 	@echo "  fmt-check      Verify formatting without writing"
 	@echo "  lint           Run golangci-lint v2, fallback to go vet if missing"
@@ -67,6 +68,15 @@ build-binaries:
 			-X $(MODULE_NAME)/version.BuildArch=$$GOARCH" \
 			-o $$OUTPUT . || exit 1; \
 	done
+
+build-check:
+	@for os in linux darwin windows; do \
+		for arch in amd64 arm64; do \
+			echo "checking $$os/$$arch"; \
+			GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -o /dev/null ./... || exit 1; \
+		done; \
+	done
+	@echo "all platforms compile"
 
 fmt: fmt-go fmt-oxfmt
 	@echo "Formatting complete."

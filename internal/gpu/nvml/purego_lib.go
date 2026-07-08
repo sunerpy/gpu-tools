@@ -1,3 +1,5 @@
+//go:build linux || darwin
+
 package nvml
 
 import (
@@ -53,7 +55,7 @@ type puregoLib struct {
 	nvmlSystemGetCudaDriverVersion            func(*int32) uint32
 }
 
-func newPuregoLib() (*puregoLib, error) {
+func newPuregoLib() (nvmlLib, error) {
 	handle, err := purego.Dlopen(nvmlLibraryName, purego.RTLD_NOW|purego.RTLD_GLOBAL)
 	if err != nil {
 		return nil, fmt.Errorf("dlopen %s: %w", nvmlLibraryName, err)
