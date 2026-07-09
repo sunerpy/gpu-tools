@@ -27,12 +27,15 @@ func overrideWatchSeams(t *testing.T, frames int) {
 	previousCtx := watchContext
 
 	ch := make(chan time.Time, frames)
+	// Fill eagerly: the watch loop runs watchContext() (spawning the drain
+	// watcher) before newTicker(), so filling inside newTicker let the watcher
+	// see len(ch)==0 and cancel before any frame rendered (flaky under CI load).
+	for range frames {
+		ch <- time.Now()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	newTicker = func(time.Duration) (<-chan time.Time, func()) {
-		for range frames {
-			ch <- time.Now()
-		}
 		return ch, func() {}
 	}
 	watchContext = func() (context.Context, context.CancelFunc) {
