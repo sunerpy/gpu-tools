@@ -54,7 +54,7 @@ jobs:
           config: cliff.toml
           args: --latest --strip header
         env:
-          OUTPUT: RELEASE_CHANGELOG.md
+          OUTPUT: ${{ runner.temp }}/RELEASE_CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
 
       - name: Run GoReleaser
@@ -62,7 +62,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --release-notes=RELEASE_CHANGELOG.md
+          args: release --clean --release-notes=${{ runner.temp }}/RELEASE_CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
