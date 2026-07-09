@@ -14,8 +14,18 @@ import (
 )
 
 type fakeRunner struct {
-	out  []byte
-	err  error
+	out          []byte
+	helpOut      []byte
+	queryOut     []byte
+	err          error
+	computeErr   error
+	name         string
+	args         []string
+	gpuQueryArgs []string
+	calls        []fakeRunCall
+}
+
+type fakeRunCall struct {
 	name string
 	args []string
 }
@@ -23,17 +33,63 @@ type fakeRunner struct {
 func (r *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
 	r.name = name
 	r.args = append([]string(nil), args...)
+	r.calls = append(r.calls, fakeRunCall{name: name, args: append([]string(nil), args...)})
 	if r.err != nil {
 		return nil, r.err
+	}
+	if len(args) == 1 && args[0] == "--help-query-gpu" {
+		if r.helpOut == nil {
+			return fullFieldHelp(), nil
+		}
+		return append([]byte(nil), r.helpOut...), nil
+	}
+	if len(args) == 1 && args[0] == "--help-query-compute-apps" {
+		return fullComputeAppsHelp(), nil
+	}
+	if len(args) > 0 && strings.HasPrefix(args[0], "--query-compute-apps=") {
+		if r.computeErr != nil {
+			return nil, r.computeErr
+		}
+		return nil, nil
+	}
+	// --query-gpu=...
+	r.gpuQueryArgs = append([]string(nil), args...)
+	if r.queryOut != nil {
+		return append([]byte(nil), r.queryOut...), nil
 	}
 	return append([]byte(nil), r.out...), nil
 }
 
+func fullFieldHelp() []byte {
+	var builder strings.Builder
+	for _, field := range wantedFields {
+		builder.WriteString("\"")
+		builder.WriteString(field)
+		builder.WriteString("\" - supported field.\n")
+	}
+	return []byte(builder.String())
+}
+
+const reducedFieldHelp = `"index" - GPU index.
+"uuid" - GPU UUID.
+"name" - Product name.
+"memory.total" - Total memory.
+"memory.used" - Used memory.
+"temperature.gpu" - GPU temperature.
+"power.draw" - Power draw.
+"power.limit" - Power limit.
+"clocks.mem" - Memory clock.
+"utilization.gpu" - GPU utilization.
+"utilization.memory" - Memory utilization.
+"pstate" - Performance state.
+"driver_version" - Driver version.
+`
+
 func TestCollector_Device_parsesTwoGPUCSV_whenQuerySucceeds(t *testing.T) {
 	// Given
 	runner := &fakeRunner{out: []byte(strings.Join([]string{
-		"0, GPU-111, NVIDIA A100-SXM4-40GB, 40960, 1024, 55, 120.50, 400.00, 1410, 1215, 75, 20, P0, 535.129.03",
-		"1, GPU-222, NVIDIA L40S, 46068, 2048, 60, 80.25, 350.00, 1800, 9001, 42, 11, P2, 535.129.03",
+		"0, GPU-111, NVIDIA A100-SXM4-40GB, 40960, 1024, 55, 120.50, 400.00, 1410, 1215, 75, 20, P0, 535.129.03, 30, 10, 4, 16",
+		"1, GPU-222, NVIDIA L40S, 46068, 2048, 60, 80.25, 350.00, 1800, 9001, 42, 11, P2, 535.129.03, 25, 5, 3, 8",
 	}, "\n"))}
 	collector := newCollectorWithRunner(runner, "/usr/bin/nvidia-smi")
 
@@ -45,8 +101,8 @@ func TestCollector_Device_parsesTwoGPUCSV_whenQuerySucceeds(t *testing.T) {
 	if runner.name != "/usr/bin/nvidia-smi" {
 		t.Fatalf("expected runner name /usr/bin/nvidia-smi, got %q", runner.name)
 	}
-	if !reflect.DeepEqual(runner.args, queryArgs) {
-		t.Fatalf("expected args %#v, got %#v", queryArgs, runner.args)
+	if !reflect.DeepEqual(runner.gpuQueryArgs, queryArgs(wantedFields)) {
+		t.Fatalf("expected args %#v, got %#v", queryArgs(wantedFields), runner.gpuQueryArgs)
 	}
 	requireDevice(t, device, gpu.Device{
 		Index:          1,
@@ -63,12 +119,16 @@ func TestCollector_Device_parsesTwoGPUCSV_whenQuerySucceeds(t *testing.T) {
 		UtilizationMem: 11,
 		PState:         "P2",
 		DriverVersion:  "535.129.03",
+		EncoderUtil:    25,
+		DecoderUtil:    5,
+		PCIeGen:        3,
+		PCIeWidth:      8,
 	})
 }
 
 func TestCollector_Device_zeroesUnavailableFields_whenCSVUsesNAValues(t *testing.T) {
 	// Given
-	runner := &fakeRunner{out: []byte("0, GPU-NA, NVIDIA Test, [N/A], [Not Supported], , [N/A], [Not Supported], , [N/A], [N/A], [Not Supported], [N/A], \n")}
+	runner := &fakeRunner{out: []byte("0, GPU-NA, NVIDIA Test, [N/A], [Not Supported], , [N/A], [Not Supported], , [N/A], [N/A], [Not Supported], [N/A], , [N/A], [Not Supported], [N/A], \n")}
 	collector := newCollectorWithRunner(runner, "nvidia-smi")
 
 	// When
@@ -81,6 +141,83 @@ func TestCollector_Device_zeroesUnavailableFields_whenCSVUsesNAValues(t *testing
 		UUID:  "GPU-NA",
 		Name:  "NVIDIA Test",
 	})
+}
+
+func TestCollector_Device_leavesUnsupportedFieldZero_whenHelpQueryOmitsGraphicsClock(t *testing.T) {
+	// Given
+	runner := &fakeRunner{
+		helpOut:  []byte(reducedFieldHelp),
+		queryOut: []byte("0, GPU-111, NVIDIA A100, 40960, 1024, 55, 120.50, 400.00, 1215, 75, 20, P0, 535.129.03\n"),
+	}
+	collector := newCollectorWithRunner(runner, "nvidia-smi")
+
+	// When
+	device, err := collector.Device(0)
+
+	// Then
+	requireNoError(t, err)
+	expectedFields := []string{
+		fieldIndex,
+		fieldUUID,
+		fieldName,
+		fieldMemoryTotal,
+		fieldMemoryUsed,
+		fieldTemperature,
+		fieldPowerDraw,
+		fieldPowerLimit,
+		fieldClockMem,
+		fieldUtilGPU,
+		fieldUtilMem,
+		fieldPState,
+		fieldDriver,
+	}
+	if !reflect.DeepEqual(runner.gpuQueryArgs, queryArgs(expectedFields)) {
+		t.Fatalf("expected args %#v, got %#v", queryArgs(expectedFields), runner.gpuQueryArgs)
+	}
+	requireDevice(t, device, gpu.Device{
+		Index:          0,
+		UUID:           "GPU-111",
+		Name:           "NVIDIA A100",
+		MemoryTotal:    40960 * 1024 * 1024,
+		MemoryUsed:     1024 * 1024 * 1024,
+		Temperature:    55,
+		PowerDraw:      120500,
+		PowerLimit:     400000,
+		ClockMem:       1215,
+		UtilizationGPU: 75,
+		UtilizationMem: 20,
+		PState:         "P0",
+		DriverVersion:  "535.129.03",
+	})
+}
+
+func TestCollector_DeviceCount_cachesSupportedFields_whenCollectorQueriesTwice(t *testing.T) {
+	// Given
+	runner := &fakeRunner{out: []byte("0, GPU-111, NVIDIA A100, 40960, 1024, 55, 120.50, 400.00, 1410, 1215, 75, 20, P0, 535.129.03, 30, 10, 4, 16\n")}
+	collector := newCollectorWithRunner(runner, "nvidia-smi")
+
+	// When
+	count, countErr := collector.DeviceCount()
+	device, deviceErr := collector.Device(0)
+
+	// Then
+	requireNoError(t, countErr)
+	requireNoError(t, deviceErr)
+	if count != 1 {
+		t.Fatalf("expected count 1, got %d", count)
+	}
+	if device == nil {
+		t.Fatal("expected device, got nil")
+	}
+	helpCalls := 0
+	for _, call := range runner.calls {
+		if reflect.DeepEqual(call.args, []string{"--help-query-gpu"}) {
+			helpCalls++
+		}
+	}
+	if helpCalls != 1 {
+		t.Fatalf("expected one help-query call, got %d", helpCalls)
+	}
 }
 
 func TestCollector_Device_returnsError_whenCSVRowHasWrongColumnCount(t *testing.T) {
@@ -184,8 +321,8 @@ func TestCollector_DeviceCount_returnsError_whenRunnerFailsForNonAvailabilityRea
 func TestCollector_DeviceCount_returnsParsedRowCount_whenQuerySucceeds(t *testing.T) {
 	// Given
 	runner := &fakeRunner{out: []byte(strings.Join([]string{
-		"0, GPU-111, NVIDIA A100, 40960, 1024, 55, 120.50, 400.00, 1410, 1215, 75, 20, P0, 535.129.03",
-		"1, GPU-222, NVIDIA L40S, 46068, 2048, 60, 80.25, 350.00, 1800, 9001, 42, 11, P2, 535.129.03",
+		"0, GPU-111, NVIDIA A100, 40960, 1024, 55, 120.50, 400.00, 1410, 1215, 75, 20, P0, 535.129.03, 30, 10, 4, 16",
+		"1, GPU-222, NVIDIA L40S, 46068, 2048, 60, 80.25, 350.00, 1800, 9001, 42, 11, P2, 535.129.03, 25, 5, 3, 8",
 	}, "\n"))}
 	collector := newCollectorWithRunner(runner, "nvidia-smi")
 
