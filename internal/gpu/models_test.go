@@ -1,6 +1,9 @@
 package gpu
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestDevice_exposesGPUFieldsWithDocumentedUnits(t *testing.T) {
 	// Given
@@ -58,6 +61,57 @@ func TestDevice_exposesGPUFieldsWithDocumentedUnits(t *testing.T) {
 	}
 	if mig.GIID != 7 || mig.CIID != 3 || mig.UUID != "MIG-uuid" || mig.MemoryTotal != 10*1024*1024*1024 {
 		t.Fatalf("unexpected MIG device: %#v", mig)
+	}
+}
+
+func TestDevice_JSONRoundTrip_preservesProcessAndRicherMetricFields(t *testing.T) {
+	// Given
+	var zeroProcess GPUProcess
+	if zeroProcess.PID != 0 || zeroProcess.Name != "" || zeroProcess.User != "" || zeroProcess.UsedMemory != 0 || zeroProcess.Type != "" {
+		t.Fatalf("unexpected GPUProcess zero value: %#v", zeroProcess)
+	}
+	device := Device{
+		Index:            2,
+		UUID:             "GPU-json",
+		Name:             "JSON GPU",
+		MemoryTotal:      24 * 1024 * 1024 * 1024,
+		MemoryUsed:       6 * 1024 * 1024 * 1024,
+		EncoderUtil:      17,
+		DecoderUtil:      23,
+		PCIeGen:          4,
+		PCIeWidth:        16,
+		MemBandwidthUtil: 88,
+		Processes: []GPUProcess{
+			{PID: 1001, Name: "trainer", User: "alice", UsedMemory: 4 * 1024 * 1024 * 1024, Type: "compute"},
+			{PID: 1002, Name: "compositor", User: "bob", UsedMemory: 512 * 1024 * 1024, Type: "graphics"},
+		},
+	}
+
+	// When
+	payload, err := json.Marshal(device)
+	if err != nil {
+		t.Fatalf("marshal device: %v", err)
+	}
+	var got Device
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("unmarshal device: %v", err)
+	}
+
+	// Then
+	if got.EncoderUtil != device.EncoderUtil || got.DecoderUtil != device.DecoderUtil {
+		t.Fatalf("unexpected encoder/decoder utilization after JSON round trip: %#v", got)
+	}
+	if got.PCIeGen != device.PCIeGen || got.PCIeWidth != device.PCIeWidth {
+		t.Fatalf("unexpected PCIe fields after JSON round trip: %#v", got)
+	}
+	if got.MemBandwidthUtil != device.MemBandwidthUtil {
+		t.Fatalf("unexpected memory bandwidth utilization after JSON round trip: %#v", got)
+	}
+	if len(got.Processes) != 2 {
+		t.Fatalf("expected 2 processes after JSON round trip, got %#v", got.Processes)
+	}
+	if got.Processes[0] != device.Processes[0] || got.Processes[1] != device.Processes[1] {
+		t.Fatalf("unexpected processes after JSON round trip: %#v", got.Processes)
 	}
 }
 
