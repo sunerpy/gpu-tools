@@ -1,0 +1,100 @@
+{
+  "Host": "gpu-host-02",
+  "Timestamp": "2026-01-02T03:04:05Z",
+  "Backend": "nvml",
+  "Devices": [
+    {
+      "Index": 0,
+      "UUID": "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0000",
+      "Name": "NVIDIA RTX 6000 Ada",
+      "MemoryTotal": 25769803776,
+      "MemoryUsed": 6442450944,
+      "Temperature": 70,
+      "PowerDraw": 240000,
+      "PowerLimit": 300000,
+      "ClockGraphics": 0,
+      "ClockMem": 0,
+      "UtilizationGPU": 88,
+      "UtilizationMem": 55,
+      "ThrottleReasons": null,
+      "ECCEnabled": true,
+      "MIGEnabled": false,
+      "MIGDevices": null,
+      "PState": "P0",
+      "FanSpeed": null,
+      "DriverVersion": "555.42.02",
+      "CudaVersion": "12.5",
+      "EncoderUtil": 30,
+      "DecoderUtil": 12,
+      "PCIeGen": 4,
+      "PCIeWidth": 16,
+      "MemBandwidthUtil": 0,
+      "Processes": [
+        {
+          "PID": 4242,
+          "Name": "python",
+          "User": "alice",
+          "UsedMemory": 4294967296,
+          "Type": "compute"
+        },
+        {
+          "PID": 900,
+          "Name": "Xorg",
+          "User": "root",
+          "UsedMemory": 268435456,
+          "Type": "graphics"
+        }
+      ]
+    },
+    {
+      "Index": 1,
+      "UUID": "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001",
+      "Name": "NVIDIA L4",
+      "MemoryTotal": 25769803776,
+      "MemoryUsed": 3221225472,
+      "Temperature": 58,
+      "PowerDraw": 60000,
+      "PowerLimit": 72000,
+      "ClockGraphics": 0,
+      "ClockMem": 0,
+      "UtilizationGPU": 40,
+      "UtilizationMem": 22,
+      "ThrottleReasons": null,
+      "ECCEnabled": null,
+      "MIGEnabled": false,
+      "MIGDevices": null,
+      "PState": "P2",
+      "FanSpeed": null,
+      "DriverVersion": "555.42.02",
+      "CudaVersion": "12.5",
+      "EncoderUtil": 0,
+      "DecoderUtil": 5,
+      "PCIeGen": 3,
+      "PCIeWidth": 8,
+      "MemBandwidthUtil": 0,
+      "Processes": [
+        {
+          "PID": 7777,
+          "Name": "ffmpeg",
+          "User": "bob",
+          "UsedMemory": 1073741824,
+          "Type": "compute"
+        },
+        {
+          "PID": 1010,
+          "Name": "gnome-shell",
+          "User": "carol",
+          "UsedMemory": 134217728,
+          "Type": "graphics"
+        },
+        {
+          "PID": 3003,
+          "Name": "trainer",
+          "User": "alice",
+          "UsedMemory": 2147483648,
+          "Type": "compute"
+        }
+      ]
+    }
+  ]
+}

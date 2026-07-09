@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -65,12 +66,14 @@ func (TableRenderer) Render(w io.Writer, snap *Snapshot) error {
 
 	var builder strings.Builder
 	tw := tabwriter.NewWriter(&builder, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "Index\tName\tUUID\tMem(used/total)\tTemp\tPower(draw/limit)\tUtil(gpu/mem)\tPState"); err != nil {
+	// Enc/Dec (encoder/decoder %) and PCIe (genXwN link) are appended as two
+	// compact columns so each device stays a single deterministic row.
+	if _, err := fmt.Fprintln(tw, "Index\tName\tUUID\tMem(used/total)\tTemp\tPower(draw/limit)\tUtil(gpu/mem)\tEnc/Dec\tPCIe\tPState"); err != nil {
 		return err
 	}
 	for _, device := range snap.Devices {
 		if _, err := fmt.Fprintf(
-			tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			device.Index,
 			device.Name,
 			device.UUID,
@@ -78,6 +81,8 @@ func (TableRenderer) Render(w io.Writer, snap *Snapshot) error {
 			formatTemperature(device),
 			formatPower(device),
 			formatUtilization(device),
+			formatEncDec(device),
+			formatPCIe(device),
 			device.PState,
 		); err != nil {
 			return err
@@ -87,8 +92,39 @@ func (TableRenderer) Render(w io.Writer, snap *Snapshot) error {
 		return err
 	}
 
+	if err := renderProcessTable(&builder, snap); err != nil {
+		return err
+	}
+
 	_, err := io.WriteString(w, builder.String())
 	return err
+}
+
+func renderProcessTable(builder *strings.Builder, snap *Snapshot) error {
+	procs := collectProcesses(snap)
+	if len(procs) == 0 {
+		return nil
+	}
+
+	builder.WriteString("\nGPU Processes\n")
+	tw := tabwriter.NewWriter(builder, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, "GPU\tPID\tType\tProcess\tUser\tMem"); err != nil {
+		return err
+	}
+	for _, proc := range procs {
+		if _, err := fmt.Fprintf(
+			tw, "%d\t%d\t%s\t%s\t%s\t%s\n",
+			proc.gpuIndex,
+			proc.process.PID,
+			proc.process.Type,
+			proc.process.Name,
+			proc.process.User,
+			formatProcessMemory(proc.process),
+		); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
 }
 
 func (JSONRenderer) Render(w io.Writer, snap *Snapshot) error {
@@ -109,11 +145,11 @@ func (MarkdownRenderer) Render(w io.Writer, snap *Snapshot) error {
 		return err
 	}
 
-	fmt.Fprintf(&builder, "| Index | Name | UUID | Mem(used/total) | Temp | Power(draw/limit) | Util(gpu/mem) | PState |\n")
-	fmt.Fprintf(&builder, "| --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	fmt.Fprintf(&builder, "| Index | Name | UUID | Mem(used/total) | Temp | Power(draw/limit) | Util(gpu/mem) | Enc/Dec | PCIe | PState |\n")
+	fmt.Fprintf(&builder, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, device := range snap.Devices {
 		fmt.Fprintf(
-			&builder, "| %d | %s | %s | %s | %s | %s | %s | %s |\n",
+			&builder, "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			device.Index,
 			device.Name,
 			device.UUID,
@@ -121,12 +157,38 @@ func (MarkdownRenderer) Render(w io.Writer, snap *Snapshot) error {
 			formatTemperature(device),
 			formatPower(device),
 			formatUtilization(device),
+			formatEncDec(device),
+			formatPCIe(device),
 			device.PState,
 		)
 	}
 
+	renderProcessMarkdown(&builder, snap)
+
 	_, err := io.WriteString(w, builder.String())
 	return err
+}
+
+func renderProcessMarkdown(builder *strings.Builder, snap *Snapshot) {
+	procs := collectProcesses(snap)
+	if len(procs) == 0 {
+		return
+	}
+
+	fmt.Fprintf(builder, "\n### GPU Processes\n\n")
+	fmt.Fprintf(builder, "| GPU | PID | Type | Process | User | Mem |\n")
+	fmt.Fprintf(builder, "| --- | --- | --- | --- | --- | --- |\n")
+	for _, proc := range procs {
+		fmt.Fprintf(
+			builder, "| %d | %d | %s | %s | %s | %s |\n",
+			proc.gpuIndex,
+			proc.process.PID,
+			proc.process.Type,
+			proc.process.Name,
+			proc.process.User,
+			formatProcessMemory(proc.process),
+		)
+	}
 }
 
 // Human-readable renderers present memory in integer MiB and power in W with one decimal.
@@ -152,4 +214,40 @@ func milliWattsToWatts(milliWatts uint32) float64 {
 
 func formatUtilization(device gpu.Device) string {
 	return fmt.Sprintf("%d/%d%%", device.UtilizationGPU, device.UtilizationMem)
+}
+
+func formatEncDec(device gpu.Device) string {
+	return fmt.Sprintf("%d/%d%%", device.EncoderUtil, device.DecoderUtil)
+}
+
+func formatPCIe(device gpu.Device) string {
+	return fmt.Sprintf("gen%dx%d", device.PCIeGen, device.PCIeWidth)
+}
+
+func formatProcessMemory(process gpu.GPUProcess) string {
+	return fmt.Sprintf("%d MiB", bytesToMiB(process.UsedMemory))
+}
+
+type deviceProcess struct {
+	gpuIndex int
+	process  gpu.GPUProcess
+}
+
+// collectProcesses flattens every device's processes into a single slice sorted
+// deterministically by (GPU index, PID) so table and markdown output never
+// depend on device or process insertion order.
+func collectProcesses(snap *Snapshot) []deviceProcess {
+	var procs []deviceProcess
+	for _, device := range snap.Devices {
+		for _, process := range device.Processes {
+			procs = append(procs, deviceProcess{gpuIndex: device.Index, process: process})
+		}
+	}
+	sort.Slice(procs, func(i, j int) bool {
+		if procs[i].gpuIndex != procs[j].gpuIndex {
+			return procs[i].gpuIndex < procs[j].gpuIndex
+		}
+		return procs[i].process.PID < procs[j].process.PID
+	})
+	return procs
 }

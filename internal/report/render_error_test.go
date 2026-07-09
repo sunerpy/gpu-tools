@@ -65,6 +65,34 @@ func Test_TableRenderer_Render_returns_flush_error_when_tabwriter_flush_fails(t 
 	}
 }
 
+func Test_TableRenderer_Render_returns_tabwriter_error_when_process_header_write_fails(t *testing.T) {
+	// Given
+	restore := patchTabwriterWrite(t, 4)
+	defer restore()
+
+	// When
+	err := TableRenderer{}.Render(discardWriter{}, processSnapshot())
+
+	// Then
+	if !errors.Is(err, errTabwriterWriteFailed) {
+		t.Fatalf("Render error = %v, want errTabwriterWriteFailed", err)
+	}
+}
+
+func Test_TableRenderer_Render_returns_tabwriter_error_when_process_row_write_fails(t *testing.T) {
+	// Given
+	restore := patchTabwriterWrite(t, 5)
+	defer restore()
+
+	// When
+	err := TableRenderer{}.Render(discardWriter{}, processSnapshot())
+
+	// Then
+	if !errors.Is(err, errTabwriterWriteFailed) {
+		t.Fatalf("Render error = %v, want errTabwriterWriteFailed", err)
+	}
+}
+
 var errTabwriterWriteFailed = errors.New("tabwriter write failed")
 
 var errTabwriterFlushFailed = errors.New("tabwriter flush failed")
@@ -116,12 +144,12 @@ func patchTabwriterFlush(t *testing.T) func() {
 //go:linkname tabwriterFlush text/tabwriter.(*Writer).flush
 func tabwriterFlush(*tabwriter.Writer) error
 
-func patchFunction(t *testing.T, target uintptr, replacement uintptr) func() {
+func patchFunction(t *testing.T, target, replacement uintptr) func() {
 	t.Helper()
 
 	const jumpSize = 12
 	pageSize := syscall.Getpagesize()
-	pageStart := target & ^(uintptr(pageSize - 1))
+	pageStart := target & ^uintptr(pageSize-1)
 	setPageProtection(t, pageStart, pageSize, syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC)
 
 	original := readProcessMemory(t, target, jumpSize)
@@ -133,7 +161,7 @@ func patchFunction(t *testing.T, target uintptr, replacement uintptr) func() {
 	}
 }
 
-func setPageProtection(t *testing.T, pageStart uintptr, pageSize int, protection int) {
+func setPageProtection(t *testing.T, pageStart uintptr, pageSize, protection int) {
 	t.Helper()
 
 	_, _, errno := syscall.RawSyscall(syscall.SYS_MPROTECT, pageStart, uintptr(pageSize), uintptr(protection))

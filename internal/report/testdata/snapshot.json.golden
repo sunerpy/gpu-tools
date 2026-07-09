@@ -26,7 +26,13 @@
       "PState": "P0",
       "FanSpeed": 68,
       "DriverVersion": "555.42.02",
-      "CudaVersion": "12.5"
+      "CudaVersion": "12.5",
+      "EncoderUtil": 0,
+      "DecoderUtil": 0,
+      "PCIeGen": 0,
+      "PCIeWidth": 0,
+      "MemBandwidthUtil": 0,
+      "Processes": null
     },
     {
       "Index": 1,
@@ -55,7 +61,13 @@
       "PState": "P8",
       "FanSpeed": null,
       "DriverVersion": "555.42.02",
-      "CudaVersion": "12.5"
+      "CudaVersion": "12.5",
+      "EncoderUtil": 0,
+      "DecoderUtil": 0,
+      "PCIeGen": 0,
+      "PCIeWidth": 0,
+      "MemBandwidthUtil": 0,
+      "Processes": null
     }
   ]
 }

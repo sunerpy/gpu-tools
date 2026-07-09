@@ -269,6 +269,66 @@ func emptySnapshot() *Snapshot {
 	}
 }
 
+func processSnapshot() *Snapshot {
+	eccEnabled := true
+
+	return &Snapshot{
+		Host:      "gpu-host-02",
+		Timestamp: fixedTimestamp(),
+		Backend:   "nvml",
+		Devices: []gpu.Device{
+			{
+				Index:          0,
+				UUID:           "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0000",
+				Name:           "NVIDIA RTX 6000 Ada",
+				MemoryTotal:    24 * 1024 * 1024 * 1024,
+				MemoryUsed:     6 * 1024 * 1024 * 1024,
+				Temperature:    70,
+				PowerDraw:      240000,
+				PowerLimit:     300000,
+				UtilizationGPU: 88,
+				UtilizationMem: 55,
+				EncoderUtil:    30,
+				DecoderUtil:    12,
+				PCIeGen:        4,
+				PCIeWidth:      16,
+				PState:         "P0",
+				DriverVersion:  "555.42.02",
+				CudaVersion:    "12.5",
+				ECCEnabled:     &eccEnabled,
+				Processes: []gpu.GPUProcess{
+					{PID: 4242, Name: "python", User: "alice", UsedMemory: 4 * 1024 * 1024 * 1024, Type: "compute"},
+					{PID: 900, Name: "Xorg", User: "root", UsedMemory: 256 * 1024 * 1024, Type: "graphics"},
+				},
+			},
+			{
+				Index:          1,
+				UUID:           "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001",
+				Name:           "NVIDIA L4",
+				MemoryTotal:    24 * 1024 * 1024 * 1024,
+				MemoryUsed:     3 * 1024 * 1024 * 1024,
+				Temperature:    58,
+				PowerDraw:      60000,
+				PowerLimit:     72000,
+				UtilizationGPU: 40,
+				UtilizationMem: 22,
+				EncoderUtil:    0,
+				DecoderUtil:    5,
+				PCIeGen:        3,
+				PCIeWidth:      8,
+				PState:         "P2",
+				DriverVersion:  "555.42.02",
+				CudaVersion:    "12.5",
+				Processes: []gpu.GPUProcess{
+					{PID: 7777, Name: "ffmpeg", User: "bob", UsedMemory: 1024 * 1024 * 1024, Type: "compute"},
+					{PID: 1010, Name: "gnome-shell", User: "carol", UsedMemory: 128 * 1024 * 1024, Type: "graphics"},
+					{PID: 3003, Name: "trainer", User: "alice", UsedMemory: 2 * 1024 * 1024 * 1024, Type: "compute"},
+				},
+			},
+		},
+	}
+}
+
 func fixedTimestamp() time.Time {
 	return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 }
@@ -279,6 +339,97 @@ type failingWriter struct{}
 
 func (failingWriter) Write(_ []byte) (int, error) {
 	return 0, errWriteFailed
+}
+
+func Test_TableRenderer_Render_matches_process_golden_when_devices_have_processes(t *testing.T) {
+	// Given
+	snap := processSnapshot()
+
+	// When
+	got := renderString(t, TableRenderer{}, snap)
+
+	// Then
+	want := readGolden(t, "table_processes.golden")
+	if got != want {
+		t.Fatalf("table process output mismatch\nwant:\n%q\ngot:\n%q", want, got)
+	}
+}
+
+func Test_MarkdownRenderer_Render_matches_process_golden_when_devices_have_processes(t *testing.T) {
+	// Given
+	snap := processSnapshot()
+
+	// When
+	got := renderString(t, MarkdownRenderer{}, snap)
+
+	// Then
+	want := readGolden(t, "snapshot_processes.md.golden")
+	if got != want {
+		t.Fatalf("markdown process output mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func Test_JSONRenderer_Render_matches_process_golden_when_devices_have_processes(t *testing.T) {
+	// Given
+	snap := processSnapshot()
+
+	// When
+	got := renderString(t, JSONRenderer{}, snap)
+
+	// Then
+	want := readGolden(t, "snapshot_processes.json.golden")
+	if got != want {
+		t.Fatalf("json process output mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func Test_TableRenderer_Render_omits_process_section_when_no_device_has_processes(t *testing.T) {
+	// Given
+	snap := fixedSnapshot()
+
+	// When
+	got := renderString(t, TableRenderer{}, snap)
+
+	// Then
+	if strings.Contains(got, "GPU Processes") {
+		t.Fatalf("table output must not contain process section when no processes present:\n%s", got)
+	}
+}
+
+func Test_MarkdownRenderer_Render_omits_process_section_when_no_device_has_processes(t *testing.T) {
+	// Given
+	snap := fixedSnapshot()
+
+	// When
+	got := renderString(t, MarkdownRenderer{}, snap)
+
+	// Then
+	if strings.Contains(got, "GPU Processes") {
+		t.Fatalf("markdown output must not contain process section when no processes present:\n%s", got)
+	}
+}
+
+func Test_TableRenderer_Render_sorts_processes_by_gpu_then_pid(t *testing.T) {
+	// Given
+	snap := processSnapshot()
+
+	// When
+	got := renderString(t, TableRenderer{}, snap)
+
+	// Then
+	// Fixture PIDs are intentionally unsorted; required order is (GPU,PID) ascending.
+	order := []string{"900", "4242", "1010", "3003", "7777"}
+	prev := -1
+	for _, pid := range order {
+		idx := strings.Index(got, pid)
+		if idx < 0 {
+			t.Fatalf("process PID %s missing from output:\n%s", pid, got)
+		}
+		if idx <= prev {
+			t.Fatalf("process PID %s out of sorted order in output:\n%s", pid, got)
+		}
+		prev = idx
+	}
 }
 
 func Test_Renderers_never_emit_ansi_escape_sequences(t *testing.T) {

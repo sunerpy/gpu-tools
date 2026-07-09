@@ -1,0 +1,11 @@
+Index  Name                 UUID                                      Mem(used/total)  Temp  Power(draw/limit)  Util(gpu/mem)  Enc/Dec  PCIe     PState
+0      NVIDIA RTX 6000 Ada  GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0000  6144/24576 MiB   70°C  240.0/300.0 W      88/55%         30/12%   gen4x16  P0
+1      NVIDIA L4            GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001  3072/24576 MiB   58°C  60.0/72.0 W        40/22%         0/5%     gen3x8   P2
+
+GPU Processes
+GPU  PID   Type      Process      User   Mem
+0    900   graphics  Xorg         root   256 MiB
+0    4242  compute   python       alice  4096 MiB
+1    1010  graphics  gnome-shell  carol  128 MiB
+1    3003  compute   trainer      alice  2048 MiB
+1    7777  compute   ffmpeg       bob    1024 MiB
