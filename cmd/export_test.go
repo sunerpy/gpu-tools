@@ -183,7 +183,7 @@ func TestExportCommand_returnsError_whenBackendUnavailable(t *testing.T) {
 }
 
 func TestExportCommand_runEShutsDownImmediately_whenParentContextCancelled(t *testing.T) {
-	// Given: a root command whose context is already cancelled, so the RunE
+	// Given: a root command whose context is already canceled, so the RunE
 	// signal.NotifyContext-derived context is done the moment Serve starts.
 	configPath := writeReportConfig(t, t.TempDir(), core.OutputTable)
 	overrideGPUFactory(t, newFakeCollector(reportDevices()), nil)

@@ -52,7 +52,7 @@ func runTune(cmd *cobra.Command) (err error) {
 	if err != nil {
 		return detectFactoryError(err)
 	}
-	if err := collector.Init(); err != nil {
+	if err = collector.Init(); err != nil {
 		return fmt.Errorf("initialize GPU collector: %w", err)
 	}
 	defer func() {

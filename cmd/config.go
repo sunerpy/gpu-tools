@@ -38,7 +38,7 @@ func newConfigInitCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve default config path: %w", err)
 			}
-			if err := writeDefaultConfig(path, force); err != nil {
+			if err = writeDefaultConfig(path, force); err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Wrote default config to %s\n", path)

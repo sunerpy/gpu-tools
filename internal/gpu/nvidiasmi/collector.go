@@ -81,7 +81,8 @@ func configuredPath() (string, error) {
 		return "", fmt.Errorf("load config: %w", err)
 	}
 	if strings.TrimSpace(config.NvidiaSmiPath) != "" {
-		path, err := lookPath(config.NvidiaSmiPath)
+		var path string
+		path, err = lookPath(config.NvidiaSmiPath)
 		if err != nil {
 			return "", fmt.Errorf("%w: %w", gpu.ErrBackendUnavailable, err)
 		}

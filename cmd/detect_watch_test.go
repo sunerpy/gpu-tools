@@ -215,7 +215,7 @@ func TestDetectWatch_realContextSeamCancelsOnStop(t *testing.T) {
 	select {
 	case <-ctx.Done():
 	case <-time.After(time.Second):
-		t.Fatalf("expected cancelled context to be done")
+		t.Fatalf("expected canceled context to be done")
 	}
 }
 
@@ -259,7 +259,7 @@ func TestDetectWatch_clampsTTLToOneSecond_whenWatchExceedsOneSecond(t *testing.T
 }
 
 func TestDetectWatch_returnsWithoutFrames_whenContextCancelsBeforeTick(t *testing.T) {
-	// Given: a ticker that never fires and a context already cancelled.
+	// Given: a ticker that never fires and a context already canceled.
 	collector := newFakeCollector([]gpu.Device{{Index: 0, Name: "idle GPU"}})
 	overrideGPUFactory(t, collector, nil)
 
@@ -283,7 +283,7 @@ func TestDetectWatch_returnsWithoutFrames_whenContextCancelsBeforeTick(t *testin
 	stdout, _, err := executeCommand(newRootCmd(), "detect", "-o", "table", "--watch", "1s")
 	// Then
 	if err != nil {
-		t.Fatalf("expected cancelled watch to exit cleanly, got %v", err)
+		t.Fatalf("expected canceled watch to exit cleanly, got %v", err)
 	}
 	if strings.Contains(stdout, clearSeq) {
 		t.Fatalf("expected no frames when context cancels first, got:\n%q", stdout)

@@ -75,7 +75,7 @@ func runDetectOnce(cmd *cobra.Command, cfg *core.Config) (err error) {
 	if err != nil {
 		return detectFactoryError(err)
 	}
-	if err := collector.Init(); err != nil {
+	if err = collector.Init(); err != nil {
 		return fmt.Errorf("initialize GPU collector: %w", err)
 	}
 	defer func() {
@@ -105,7 +105,7 @@ func runDetectWatch(cmd *cobra.Command, cfg *core.Config, watch time.Duration) (
 	if err != nil {
 		return detectFactoryError(err)
 	}
-	if err := inner.Init(); err != nil {
+	if err = inner.Init(); err != nil {
 		return fmt.Errorf("initialize GPU collector: %w", err)
 	}
 	defer func() {
