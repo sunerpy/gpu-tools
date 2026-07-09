@@ -83,4 +83,33 @@ jobs:
       - name: Publish completed draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${TAG_NAME}" --draft=false --latest
+        run: |
+          set -euo pipefail
+          # release-please and GoReleaser can each leave a draft release on the
+          # same tag (GoReleaser can't locate release-please's draft by tag via
+          # the API, so it creates its own). Publish the one that actually holds
+          # the built assets and delete any empty duplicate draft on this tag.
+          asset_id=""
+          empty_ids=""
+          while read -r id count; do
+            if [ "${count}" -gt 0 ] && [ -z "${asset_id}" ]; then
+              asset_id="${id}"
+            else
+              empty_ids="${empty_ids} ${id}"
+            fi
+          done < <(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+                     --jq ".[] | select(.tag_name==\"${TAG_NAME}\") | \"\(.id) \(.assets|length)\"")
+
+          if [ -z "${asset_id}" ]; then
+            echo "no release with assets found for ${TAG_NAME}" >&2
+            exit 1
+          fi
+
+          for id in ${empty_ids}; do
+            echo "deleting empty duplicate draft release ${id} for ${TAG_NAME}"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
+          done
+
+          echo "publishing release ${asset_id} for ${TAG_NAME}"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${asset_id}" \
+            -F draft=false -F make_latest=true --jq '{id:.id,draft:.draft,tag:.tag_name}'
