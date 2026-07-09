@@ -263,8 +263,8 @@ func assertReportMarkdown(t *testing.T, text string) {
 		"- Device count: `2`",
 		"- Aggregate memory total: `72 MiB`",
 		"- Max temperature: `55°C`",
-		"| Index | Name | UUID | Mem(used/total) | Temp | Power(draw/limit) | Util(gpu/mem) | PState |",
-		"| 0 | RTX 4090 | GPU-report-0 | 12/24 MiB | 42°C | 100.0/450.0 W | 10/20% | P0 |",
+		"| Index | Name | UUID | Mem(used/total) | Temp | Power(draw/limit) | Util(gpu/mem) | Enc/Dec | PCIe | PState |",
+		"| 0 | RTX 4090 | GPU-report-0 | 12/24 MiB | 42°C | 100.0/450.0 W | 10/20% | 0/0% | gen0x0 | P0 |",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected markdown to contain %q, got:\n%s", want, text)
