@@ -24,6 +24,12 @@ type fakeNVMLLib struct {
 	deviceThrottleReasonsFunc func(uintptr) (uint64, error)
 	deviceECCEnabledFunc      func(uintptr) (*bool, error)
 	deviceMIGEnabledFunc      func(uintptr) (bool, error)
+	deviceComputeProcsFunc    func(uintptr) ([]ProcInfo, error)
+	deviceGraphicsProcsFunc   func(uintptr) ([]ProcInfo, error)
+	deviceEncoderUtilFunc     func(uintptr) (uint32, error)
+	deviceDecoderUtilFunc     func(uintptr) (uint32, error)
+	devicePCIeGenFunc         func(uintptr) (uint32, error)
+	devicePCIeWidthFunc       func(uintptr) (uint32, error)
 	driverVersionFunc         func() (string, error)
 	cudaVersionFunc           func() (string, error)
 }
@@ -142,6 +148,48 @@ func (f *fakeNVMLLib) DeviceMIGEnabled(h uintptr) (bool, error) {
 	return h == 101, nil
 }
 
+func (f *fakeNVMLLib) DeviceComputeProcesses(h uintptr) ([]ProcInfo, error) {
+	if f.deviceComputeProcsFunc != nil {
+		return f.deviceComputeProcsFunc(h)
+	}
+	return nil, nil
+}
+
+func (f *fakeNVMLLib) DeviceGraphicsProcesses(h uintptr) ([]ProcInfo, error) {
+	if f.deviceGraphicsProcsFunc != nil {
+		return f.deviceGraphicsProcsFunc(h)
+	}
+	return nil, nil
+}
+
+func (f *fakeNVMLLib) DeviceEncoderUtil(h uintptr) (uint32, error) {
+	if f.deviceEncoderUtilFunc != nil {
+		return f.deviceEncoderUtilFunc(h)
+	}
+	return 30, nil
+}
+
+func (f *fakeNVMLLib) DeviceDecoderUtil(h uintptr) (uint32, error) {
+	if f.deviceDecoderUtilFunc != nil {
+		return f.deviceDecoderUtilFunc(h)
+	}
+	return 10, nil
+}
+
+func (f *fakeNVMLLib) DevicePCIeGen(h uintptr) (uint32, error) {
+	if f.devicePCIeGenFunc != nil {
+		return f.devicePCIeGenFunc(h)
+	}
+	return 4, nil
+}
+
+func (f *fakeNVMLLib) DevicePCIeWidth(h uintptr) (uint32, error) {
+	if f.devicePCIeWidthFunc != nil {
+		return f.devicePCIeWidthFunc(h)
+	}
+	return 16, nil
+}
+
 func (f *fakeNVMLLib) DriverVersion() (string, error) {
 	if f.driverVersionFunc != nil {
 		return f.driverVersionFunc()
@@ -198,6 +246,10 @@ func TestCollector_Device_mapsAllFields_whenLibReturnsTwoDevices(t *testing.T) {
 		ECCEnabled:      boolPtr(true),
 		DriverVersion:   "535.129.03",
 		CudaVersion:     "12020",
+		EncoderUtil:     30,
+		DecoderUtil:     10,
+		PCIeGen:         4,
+		PCIeWidth:       16,
 	})
 	requireNoError(t, secondErr)
 	requireDevice(t, second, gpu.Device{
@@ -217,7 +269,145 @@ func TestCollector_Device_mapsAllFields_whenLibReturnsTwoDevices(t *testing.T) {
 		MIGEnabled:      true,
 		DriverVersion:   "535.129.03",
 		CudaVersion:     "12020",
+		EncoderUtil:     30,
+		DecoderUtil:     10,
+		PCIeGen:         4,
+		PCIeWidth:       16,
 	})
+}
+
+func TestCollector_Device_mapsEncDecPCIe_whenLibReturnsValues(t *testing.T) {
+	// Given
+	collector := newCollectorWithLib(&fakeNVMLLib{
+		deviceEncoderUtilFunc: func(uintptr) (uint32, error) { return 30, nil },
+		deviceDecoderUtilFunc: func(uintptr) (uint32, error) { return 10, nil },
+		devicePCIeGenFunc:     func(uintptr) (uint32, error) { return 4, nil },
+		devicePCIeWidthFunc:   func(uintptr) (uint32, error) { return 16, nil },
+	})
+
+	// When
+	device, err := collector.Device(0)
+
+	// Then
+	requireNoError(t, err)
+	if device.EncoderUtil != 30 {
+		t.Fatalf("expected EncoderUtil 30, got %d", device.EncoderUtil)
+	}
+	if device.DecoderUtil != 10 {
+		t.Fatalf("expected DecoderUtil 10, got %d", device.DecoderUtil)
+	}
+	if device.PCIeGen != 4 {
+		t.Fatalf("expected PCIeGen 4, got %d", device.PCIeGen)
+	}
+	if device.PCIeWidth != 16 {
+		t.Fatalf("expected PCIeWidth 16, got %d", device.PCIeWidth)
+	}
+	if device.MemBandwidthUtil != 0 {
+		t.Fatalf("expected MemBandwidthUtil 0 for nvml v1.1, got %d", device.MemBandwidthUtil)
+	}
+}
+
+func TestCollector_Device_leavesEncDecPCIeZero_whenLibReportsUnsupported(t *testing.T) {
+	// Given: each optional metric errors (missing symbol / NOT_SUPPORTED sentinel).
+	collector := newCollectorWithLib(&fakeNVMLLib{
+		deviceEncoderUtilFunc: func(uintptr) (uint32, error) { return 0, errFakeNVML },
+		deviceDecoderUtilFunc: func(uintptr) (uint32, error) { return 0, errFakeNVML },
+		devicePCIeGenFunc:     func(uintptr) (uint32, error) { return 0, errFakeNVML },
+		devicePCIeWidthFunc:   func(uintptr) (uint32, error) { return 0, errFakeNVML },
+	})
+
+	// When
+	device, err := collector.Device(0)
+
+	// Then: Device(0) still succeeds and each optional field stays 0.
+	requireNoError(t, err)
+	if device.EncoderUtil != 0 {
+		t.Fatalf("expected EncoderUtil 0 on unsupported, got %d", device.EncoderUtil)
+	}
+	if device.DecoderUtil != 0 {
+		t.Fatalf("expected DecoderUtil 0 on unsupported, got %d", device.DecoderUtil)
+	}
+	if device.PCIeGen != 0 {
+		t.Fatalf("expected PCIeGen 0 on unsupported, got %d", device.PCIeGen)
+	}
+	if device.PCIeWidth != 0 {
+		t.Fatalf("expected PCIeWidth 0 on unsupported, got %d", device.PCIeWidth)
+	}
+}
+
+func TestCollector_Device_populatesProcesses_whenLibReturnsComputeAndGraphicsProcs(t *testing.T) {
+	// Given
+	restore := resolveProcess
+	t.Cleanup(func() { resolveProcess = restore })
+	resolveProcess = func(pid int) (string, string) {
+		switch pid {
+		case 111:
+			return "python", "alice"
+		case 222:
+			return "Xorg", "root"
+		default:
+			return "", ""
+		}
+	}
+	collector := newCollectorWithLib(&fakeNVMLLib{
+		deviceComputeProcsFunc: func(uintptr) ([]ProcInfo, error) {
+			return []ProcInfo{{PID: 111, UsedMemory: 2 * 1024 * 1024 * 1024}}, nil
+		},
+		deviceGraphicsProcsFunc: func(uintptr) ([]ProcInfo, error) {
+			return []ProcInfo{{PID: 222, UsedMemory: 512 * 1024 * 1024}}, nil
+		},
+	})
+
+	// When
+	device, err := collector.Device(0)
+
+	// Then
+	requireNoError(t, err)
+	want := []gpu.GPUProcess{
+		{PID: 111, Name: "python", User: "alice", UsedMemory: 2 * 1024 * 1024 * 1024, Type: "compute"},
+		{PID: 222, Name: "Xorg", User: "root", UsedMemory: 512 * 1024 * 1024, Type: "graphics"},
+	}
+	if !reflect.DeepEqual(device.Processes, want) {
+		t.Fatalf("unexpected processes\nwant: %#v\n got: %#v", want, device.Processes)
+	}
+}
+
+func TestCollector_Device_leavesProcessesEmpty_whenComputeProcCallFails(t *testing.T) {
+	// Given
+	collector := newCollectorWithLib(&fakeNVMLLib{
+		deviceComputeProcsFunc: func(uintptr) ([]ProcInfo, error) { return nil, errFakeNVML },
+		deviceGraphicsProcsFunc: func(uintptr) ([]ProcInfo, error) {
+			return []ProcInfo{{PID: 222, UsedMemory: 1}}, nil
+		},
+	})
+
+	// When
+	device, err := collector.Device(0)
+
+	// Then
+	requireNoError(t, err)
+	if len(device.Processes) != 0 {
+		t.Fatalf("expected empty processes on compute error, got %#v", device.Processes)
+	}
+}
+
+func TestCollector_Device_leavesProcessesEmpty_whenGraphicsProcCallFails(t *testing.T) {
+	// Given
+	collector := newCollectorWithLib(&fakeNVMLLib{
+		deviceComputeProcsFunc: func(uintptr) ([]ProcInfo, error) {
+			return []ProcInfo{{PID: 111, UsedMemory: 1}}, nil
+		},
+		deviceGraphicsProcsFunc: func(uintptr) ([]ProcInfo, error) { return nil, errFakeNVML },
+	})
+
+	// When
+	device, err := collector.Device(0)
+
+	// Then
+	requireNoError(t, err)
+	if len(device.Processes) != 0 {
+		t.Fatalf("expected empty processes on graphics error, got %#v", device.Processes)
+	}
 }
 
 func TestCollector_Device_preservesNilECC_whenLibReportsUnsupportedECC(t *testing.T) {

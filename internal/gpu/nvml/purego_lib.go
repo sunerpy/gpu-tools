@@ -10,13 +10,23 @@ import (
 )
 
 const (
-	nvmlLibraryName        = "libnvidia-ml.so.1"
-	nvmlSuccess            = 0
-	nvmlTemperatureGPU     = 0
-	nvmlClockGraphics      = 0
-	nvmlClockMem           = 2
-	nvmlStringBufferLength = 96
+	nvmlLibraryName          = "libnvidia-ml.so.1"
+	nvmlSuccess              = 0
+	nvmlErrorNotSupported    = 3
+	nvmlErrorInsufficientSz  = 7
+	nvmlTemperatureGPU       = 0
+	nvmlClockGraphics        = 0
+	nvmlClockMem             = 2
+	nvmlStringBufferLength   = 96
+	nvmlProcessQueryMaxRetry = 8
 )
+
+type nvmlProcessInfo struct {
+	pid               uint32
+	usedGpuMemory     uint64
+	gpuInstanceId     uint32 //nolint:unused // ABI mirror of nvmlProcessInfo_t v3 layout; required for correct pointer decode even though unread
+	computeInstanceId uint32 //nolint:unused // ABI mirror of nvmlProcessInfo_t v3 layout; required for correct pointer decode even though unread
+}
 
 type nvmlMemory struct {
 	total uint64
@@ -51,6 +61,12 @@ type puregoLib struct {
 	nvmlDeviceGetCurrentClocksThrottleReasons func(uintptr, *uint64) uint32
 	nvmlDeviceGetEccMode                      func(uintptr, *uint32, *uint32) uint32
 	nvmlDeviceGetMigMode                      func(uintptr, *uint32, *uint32) uint32
+	nvmlDeviceGetComputeRunningProcesses      func(uintptr, *uint32, *nvmlProcessInfo) uint32
+	nvmlDeviceGetGraphicsRunningProcesses     func(uintptr, *uint32, *nvmlProcessInfo) uint32
+	nvmlDeviceGetEncoderUtilization           func(uintptr, *uint32, *uint32) uint32
+	nvmlDeviceGetDecoderUtilization           func(uintptr, *uint32, *uint32) uint32
+	nvmlDeviceGetCurrPcieLinkGeneration       func(uintptr, *uint32) uint32
+	nvmlDeviceGetCurrPcieLinkWidth            func(uintptr, *uint32) uint32
 	nvmlSystemGetDriverVersion                func([]byte, uint32) uint32
 	nvmlSystemGetCudaDriverVersion            func(*int32) uint32
 }
@@ -80,8 +96,26 @@ func (l *puregoLib) register() {
 	purego.RegisterLibFunc(&l.nvmlDeviceGetCurrentClocksThrottleReasons, l.handle, "nvmlDeviceGetCurrentClocksThrottleReasons")
 	purego.RegisterLibFunc(&l.nvmlDeviceGetEccMode, l.handle, "nvmlDeviceGetEccMode")
 	purego.RegisterLibFunc(&l.nvmlDeviceGetMigMode, l.handle, "nvmlDeviceGetMigMode")
+	l.registerOptional(&l.nvmlDeviceGetComputeRunningProcesses, "nvmlDeviceGetComputeRunningProcesses_v3")
+	l.registerOptional(&l.nvmlDeviceGetGraphicsRunningProcesses, "nvmlDeviceGetGraphicsRunningProcesses_v3")
+	l.registerOptional(&l.nvmlDeviceGetEncoderUtilization, "nvmlDeviceGetEncoderUtilization")
+	l.registerOptional(&l.nvmlDeviceGetDecoderUtilization, "nvmlDeviceGetDecoderUtilization")
+	l.registerOptional(&l.nvmlDeviceGetCurrPcieLinkGeneration, "nvmlDeviceGetCurrPcieLinkGeneration")
+	l.registerOptional(&l.nvmlDeviceGetCurrPcieLinkWidth, "nvmlDeviceGetCurrPcieLinkWidth")
 	purego.RegisterLibFunc(&l.nvmlSystemGetDriverVersion, l.handle, "nvmlSystemGetDriverVersion")
 	purego.RegisterLibFunc(&l.nvmlSystemGetCudaDriverVersion, l.handle, "nvmlSystemGetCudaDriverVersion")
+}
+
+// registerOptional binds fn only if symbol resolves via Dlsym. purego's
+// RegisterLibFunc PANICS on an absent symbol, and the _v3 process symbols do not
+// exist on older drivers (plan R6); probing first keeps fn nil so the caller
+// treats the feature as unsupported and yields an empty process list instead of
+// crashing.
+func (l *puregoLib) registerOptional(fn any, symbol string) {
+	if _, err := purego.Dlsym(l.handle, symbol); err != nil {
+		return
+	}
+	purego.RegisterLibFunc(fn, l.handle, symbol)
 }
 
 func (l *puregoLib) Init() error {
@@ -197,6 +231,106 @@ func (l *puregoLib) DeviceMIGEnabled(h uintptr) (bool, error) {
 		return false, err
 	}
 	return current != 0, nil
+}
+
+func (l *puregoLib) DeviceComputeProcesses(h uintptr) ([]ProcInfo, error) {
+	return runningProcesses(l.nvmlDeviceGetComputeRunningProcesses, h)
+}
+
+func (l *puregoLib) DeviceGraphicsProcesses(h uintptr) ([]ProcInfo, error) {
+	return runningProcesses(l.nvmlDeviceGetGraphicsRunningProcesses, h)
+}
+
+func (l *puregoLib) DeviceEncoderUtil(h uintptr) (uint32, error) {
+	return optionalUtil(l.nvmlDeviceGetEncoderUtilization, h)
+}
+
+func (l *puregoLib) DeviceDecoderUtil(h uintptr) (uint32, error) {
+	return optionalUtil(l.nvmlDeviceGetDecoderUtilization, h)
+}
+
+func (l *puregoLib) DevicePCIeGen(h uintptr) (uint32, error) {
+	return optionalLink(l.nvmlDeviceGetCurrPcieLinkGeneration, h)
+}
+
+func (l *puregoLib) DevicePCIeWidth(h uintptr) (uint32, error) {
+	return optionalLink(l.nvmlDeviceGetCurrPcieLinkWidth, h)
+}
+
+// optionalUtil handles the NVML util calls whose second out-param is a sampling
+// period this collector discards. A nil fn (missing symbol, plan R6) or
+// NOT_SUPPORTED yields (0, nil) so Device(i) never fails.
+func optionalUtil(fn func(uintptr, *uint32, *uint32) uint32, h uintptr) (uint32, error) {
+	if fn == nil {
+		return 0, nil
+	}
+	var util, samplingPeriod uint32
+	switch code := fn(h, &util, &samplingPeriod); code {
+	case nvmlSuccess:
+		return util, nil
+	case nvmlErrorNotSupported:
+		return 0, nil
+	default:
+		return 0, nvmlReturn(code)
+	}
+}
+
+// optionalLink handles the single-out-param NVML PCIe link calls with the same
+// missing-symbol / NOT_SUPPORTED to (0, nil) best-effort contract as optionalUtil.
+func optionalLink(fn func(uintptr, *uint32) uint32, h uintptr) (uint32, error) {
+	if fn == nil {
+		return 0, nil
+	}
+	var value uint32
+	switch code := fn(h, &value); code {
+	case nvmlSuccess:
+		return value, nil
+	case nvmlErrorNotSupported:
+		return 0, nil
+	default:
+		return 0, nvmlReturn(code)
+	}
+}
+
+// runningProcesses drives NVML's count-in/out protocol: an absent symbol (fn ==
+// nil, unsupported driver) or NOT_SUPPORTED yields an empty slice with no error
+// (best-effort). Call with count=0 to learn the required size (INSUFFICIENT_SIZE
+// == 7), allocate, then call again; a shrinking count is retried a bounded
+// number of times to tolerate a race where processes appear between calls.
+func runningProcesses(fn func(uintptr, *uint32, *nvmlProcessInfo) uint32, h uintptr) ([]ProcInfo, error) {
+	if fn == nil {
+		return nil, nil
+	}
+	var count uint32
+	for range nvmlProcessQueryMaxRetry {
+		code := fn(h, &count, nil)
+		switch code {
+		case nvmlSuccess:
+			return nil, nil
+		case nvmlErrorNotSupported:
+			return nil, nil
+		case nvmlErrorInsufficientSz:
+		default:
+			return nil, nvmlReturn(code)
+		}
+		buf := make([]nvmlProcessInfo, count)
+		code = fn(h, &count, &buf[0])
+		switch code {
+		case nvmlSuccess:
+			infos := make([]ProcInfo, count)
+			for i := range infos {
+				infos[i] = ProcInfo{PID: buf[i].pid, UsedMemory: buf[i].usedGpuMemory}
+			}
+			return infos, nil
+		case nvmlErrorNotSupported:
+			return nil, nil
+		case nvmlErrorInsufficientSz:
+			continue
+		default:
+			return nil, nvmlReturn(code)
+		}
+	}
+	return nil, nil
 }
 
 func (l *puregoLib) DriverVersion() (string, error) {
