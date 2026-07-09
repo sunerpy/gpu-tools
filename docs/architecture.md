@@ -21,6 +21,11 @@
    - v1 未实现。
    - 未来可作为更完整的数据中心监控后端接入同一 `Collector` seam。
 
+此外还有一个**尽力而为的 AMD 后端**（`internal/gpu/amd`，注册名 `amd`，优先级 `30`），
+通过 `rocm-smi --json` 读取指标子集。它优先级最低，因此 `auto` 仍优先 NVIDIA
+（NVML `10` → nvidia-smi `20` → amd `30`）；只有显式 `--backend amd` 才会主动选它。
+详见下方「AMD 后端」一节。
+
 `auto` 后端按照优先级遍历已注册后端：NVML 可用时使用 NVML，否则尝试 `nvidia-smi`。
 
 ## 为什么 purego + `CGO_ENABLED=0`
@@ -34,17 +39,20 @@
 
 ## 包布局
 
-| 路径                     | 职责                                                                                |
-| ------------------------ | ----------------------------------------------------------------------------------- |
-| `cmd`                    | Cobra CLI：`version`、`config`、`completion`、`detect`、`report`、`tune`、`bench`。 |
-| `core`                   | 配置模型、默认路径、输出格式和后端常量。                                            |
-| `internal/gpu`           | GPU 设备模型、`Collector` 接口、后端注册表和 `DefaultFactory`。                     |
-| `internal/gpu/nvml`      | purego NVML collector。                                                             |
-| `internal/gpu/nvidiasmi` | `nvidia-smi` collector 和 CSV 字段转换。                                            |
-| `internal/report`        | 表格、JSON、Markdown snapshot renderer。                                            |
-| `internal/tune`          | 只读调优规则：温度、节流、ECC、功耗余量等。                                         |
-| `internal/bench`         | 外部 benchmark runner、工具枚举、输出解析。                                         |
-| `version`                | ldflags 注入的版本、构建时间、commit、目标 OS / Arch。                              |
+| 路径                     | 职责                                                                                          |
+| ------------------------ | --------------------------------------------------------------------------------------------- |
+| `cmd`                    | Cobra CLI：`version`、`config`、`completion`、`detect`、`report`、`tune`、`bench`、`export`。 |
+| `core`                   | 配置模型、默认路径、输出格式和后端常量。                                                      |
+| `internal/gpu`           | GPU 设备模型、`Collector` 接口、后端注册表和 `DefaultFactory`。                               |
+| `internal/gpu/nvml`      | purego NVML collector（含按进程采集）。                                                       |
+| `internal/gpu/nvidiasmi` | `nvidia-smi` collector、字段自动发现、`--query-compute-apps` 进程采集。                       |
+| `internal/gpu/amd`       | 尽力而为的 `rocm-smi` collector（指标子集）。                                                 |
+| `internal/gpu/cache`     | watch 模式下的 TTL 缓存 collector 包装器。                                                    |
+| `internal/exporter`      | Prometheus `prometheus.Collector`，拥有自己的 registry。                                      |
+| `internal/report`        | 表格、JSON、Markdown snapshot renderer（含 GPU Processes 区块）。                             |
+| `internal/tune`          | 只读调优规则：温度、节流、ECC、功耗余量等。                                                   |
+| `internal/bench`         | 外部 benchmark runner、工具枚举、输出解析。                                                   |
+| `version`                | ldflags 注入的版本、构建时间、commit、目标 OS / Arch。                                        |
 
 ## `Collector` 接口
 
@@ -83,3 +91,80 @@ var DefaultFactory = func(cfg core.Config) (Collector, error) {
 ```
 
 这个 seam 让命令测试可以替换 collector factory，而无需真实 NVIDIA GPU。
+
+## 字段自动发现（nvidia-smi）
+
+nvidia-smi 后端不硬编码固定的 `--query-gpu` 字段集，而是先探测驱动支持哪些字段：
+
+- 运行 `nvidia-smi --help-query-gpu`，用 `parseSupportedFields` 匹配任意 `"field" - desc`
+  行，得到当前驱动支持的字段名集合 `supportedFields`。
+- `wantedFields` 声明期望字段（含 T4 的基础字段与 v1.1 新增的
+  `utilization.encoder`、`utilization.decoder`、`pcie.link.gen.current`、
+  `pcie.link.width.current`）。新增字段是**非强制**的：当旧驱动的 `--help-query-gpu`
+  未列出它们时，`supportedFields` 守卫会将其丢弃，对应字段保持 `0`；字段名→列索引的解析
+  本就容忍缺失。
+- 最终仅用「期望 ∩ 支持」的字段发起真实 `--query-gpu` 查询，parser 再按字段名映射回列，
+  因此不同驱动版本的列顺序/缺失都能安全处理。
+
+## 按进程采集（GPU Processes）
+
+`detect` / `report` 在存在计算进程时追加 **GPU Processes** 区块，进程数据有两条独立来源：
+
+- **NVML（purego）+ `/proc`**：NVML collector 直接查询每个设备上的计算进程，再用
+  `procinfo.Resolve` 在 Linux `/proc` 上解析 PID → 进程名 / 用户。
+- **nvidia-smi `--query-compute-apps` 回退**：这是一次**独立于设备查询**的第二次查询——
+  `nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv,noheader,nounits`
+  （参数切片，无 shell）。`used_memory` 从 MiB 换算为字节；`Type` 硬编码为 `compute`
+  （graphics 进程仅 NVML 可见）。是否发起该查询同样经 `--help-query-compute-apps` 的
+  `gpu_uuid` 支持探测（复用字段自动发现的通用逻辑）。
+
+**R2 精确 UUID 归属**：由已解析设备构建 `map[uuid]deviceIndex`，每个 compute app 按
+`byUUID[app.uuid]` 查找——命中则挂到该设备的 `Processes`；未命中（未知 / ghost uuid）**静默丢弃**，
+**绝不按索引猜测归属**。两条共享同一 uuid 的记录会挂到同一设备。
+
+所有降级路径均**非致命**（返回带空 `Processes` 的设备，不报错）：`--help-query-compute-apps`
+本身失败、help 成功但缺 `gpu_uuid`、或 compute-apps 查询自身出错，都会跳过进程采集。畸形行
+（列数不符、空 uuid、非数字 pid、坏 used_memory）逐行丢弃，同一输出中的合法兄弟行仍保留。
+
+renderer 侧：`collectProcesses` 将所有设备的进程扁平化后按 `(GPU index 升序, PID 升序)`
+稳定排序，作为 table / markdown 的唯一顺序保证；JSON 则保留每设备的原始进程顺序（Device 契约）。
+
+## TTL 缓存（watch 模式）
+
+`gpu-tools detect --watch <d>` 用 `internal/gpu/cache` 的 TTL 缓存 collector 包装真实
+collector：`cache.New(inner, watchCacheTTL(watch))`。TTL 被 `watchCacheTTL` 钳制到
+**至多 1 秒**，因此即使刷新间隔更长，每帧仍反映足够新的数据，同时在高频刷新下避免对后端的
+重复读取，让刷新保持顺滑。watch 会先**急切读取一次**：若后端永久不可用则以退出码 `1`
+快速失败，绝不进入重试循环。
+
+## Exporter 设计
+
+`internal/exporter.Exporter` 实现 `prometheus.Collector`（Describe + Collect），构造时接收
+一个 `Factory func() (gpu.Collector, error)`（绑定 `gpu.DefaultFactory(cfg)`）。内部 collector
+在**首次抓取**时惰性构建（factory + `Init()`）并缓存，后续抓取复用。
+
+- **自有 registry**：exporter 通过 `prometheus.NewRegistry()` + `reg.MustRegister(e)` 拥有
+  自己的 `*prometheus.Registry`，**绝不**用全局默认 registry；因此连续构建两个 exporter 也不会 panic。
+  `cmd/export.go` 用 `promhttp.HandlerFor(exp.Registry(), ...)` 挂载 `/metrics`。
+- **无 GPU → `up 0`**：后端不可用（`ErrBackendUnavailable` / `ErrNoBackend`）时，仅发出
+  `gpu_tools_up 0`、无任何设备序列，HTTP 200，安静不报错；真实读取错误则记录到一个 `io.Writer`
+  seam（默认 stderr）并同样发出 `up 0`。`Collect` 从不向 promhttp 传播错误。
+- **并发安全**：`Collect` 全程持 `sync.Mutex`，重叠抓取不会竞争内部 collector。
+- **命名约定**：只有 `gpu_tools_up` 带 `gpu_tools` 命名空间；所有 per-GPU / per-process 序列用
+  裸 `gpu_` 前缀（有意为之，代码内有注释防止后人「修正」）。功耗从 NVML 的毫瓦换算为瓦特。
+
+`cmd/export.go` 用 `signal.NotifyContext(SIGINT, SIGTERM)` 监听中断，`ctx.Done()` 后优雅
+`srv.Shutdown(5s)`；RunE 返回 error，从不 `os.Exit`。这是一个 headless `/metrics` 端点，
+**没有** Web UI（无 HTML / 模板 / 会话 / 数据库）。
+
+## AMD 后端（rocm-smi）
+
+`internal/gpu/amd` 是尽力而为的 AMD collector，注册名 `amd`、优先级 `30`（最低，故 `auto`
+仍优先 NVIDIA，需显式 `--backend amd`）。它运行
+`rocm-smi --showid --showproductname --showuse --showmemuse --showtemp --showpower --json`
+并解析 JSON。
+
+- **指标子集**：仅覆盖 index、name、GPU / 显存利用率、显存总量 / 已用、温度、功耗。
+  **不含** 编码 / 解码利用率、PCIe 链路、时钟、功耗上限或按进程数据（这些保持 `0` / 空）。
+- 每个字段用**候选键列表**读取（不同 rocm-smi 版本键名不同，如温度有多种 `Temperature (...)`
+  写法），提升跨版本兼容性。找不到 `rocm-smi` 时返回 `gpu.ErrBackendUnavailable`。

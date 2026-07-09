@@ -1,7 +1,9 @@
 # gpu-tools
 
-> Pure-Go NVIDIA GPU infrastructure CLI for detect, report, tuning advice, and
-> benchmark workflows — single self-contained binary, no cgo, portable across glibc distributions.
+> A pure-Go, no-cgo GPU infrastructure **diagnostics + tuning-advice + benchmark + monitoring**
+> CLI — single self-contained binary, portable across glibc distributions. More than a
+> monitor: it detects inventory, renders reports, prints read-only tuning advice, runs
+> benchmarks, watches live, and serves Prometheus metrics.
 
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/)
 [![License MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -16,6 +18,7 @@
 - [Install](#install)
 - [Quickstart](#quickstart)
 - [Backends](#backends)
+- [Exporter](#exporter)
 - [Requirements](#requirements)
 - [Using with an LLM or agent](#using-with-an-llm-or-agent)
 - [Configuration](#configuration)
@@ -28,6 +31,16 @@
 - **Report** — render Markdown, table, or JSON snapshots with `gpu-tools report`.
 - **Tune** — print deterministic, read-only tuning recommendations; it never mutates hardware settings.
 - **Bench** — run supported external benchmark tools and normalize their parsed throughput.
+- **Watch** — refresh live with `gpu-tools detect --watch 2s`: the screen re-renders each
+  tick until Ctrl-C, or `-o json --watch` streams NDJSON (one compact object per line).
+- **Per-process GPU usage** — `detect` and `report` add a **GPU Processes** section
+  (GPU, PID, Type, Process, User, Mem) when compute processes are present.
+- **Richer device metrics** — encoder/decoder utilization (`Enc/Dec %`) and PCIe link
+  (`genXxwN`) alongside utilization, memory, temperature, power, and clocks.
+- **Prometheus exporter** — `gpu-tools export --listen :9835` serves a headless
+  `/metrics` endpoint for scraping and Grafana dashboards.
+- **AMD backend (best-effort)** — `--backend amd` reads a subset of metrics via
+  `rocm-smi`; `auto` still prefers NVIDIA.
 
 See [Architecture](docs/architecture.md) for the collector model and package layout.
 
@@ -80,6 +93,28 @@ gpu-tools tune
 gpu-tools bench --tool gpu-burn
 ```
 
+Live watch, per-process usage, exporter, and AMD:
+
+```bash
+# Refresh the inventory table every 2 seconds until Ctrl-C.
+gpu-tools detect --watch 2s
+
+# Stream one compact NDJSON object per tick (machine-readable watch).
+gpu-tools --output json detect --watch 2s
+
+# detect/report show a "GPU Processes" section when compute processes exist:
+#
+#   GPU Processes
+#   GPU  PID   Type     Process  User   Mem
+#   0    1234  compute  python   alice  512 MiB
+
+# Serve GPU metrics for Prometheus on http://<host>:9835/metrics.
+gpu-tools export --listen :9835
+
+# Read AMD GPUs (best-effort subset) via rocm-smi.
+gpu-tools --backend amd detect
+```
+
 Common global flags:
 
 ```bash
@@ -91,16 +126,50 @@ gpu-tools --config ./config.yaml config show
 
 ## Backends
 
-`gpu-tools` is NVIDIA-only in v1 and selects collectors through
-`--backend auto|nvml|nvidia-smi`:
+`gpu-tools` selects collectors through `--backend auto|nvml|nvidia-smi|amd`:
 
-1. **purego NVML** (`nvml`) — primary backend; loads NVML dynamically without cgo.
-2. **nvidia-smi** (`nvidia-smi`) — fallback backend; shells out to `nvidia-smi` and parses CSV.
-3. **DCGM** — deferred; not implemented in v1.
+1. **purego NVML** (`nvml`) — primary NVIDIA backend; loads NVML dynamically without cgo.
+2. **nvidia-smi** (`nvidia-smi`) — NVIDIA fallback backend; shells out to `nvidia-smi` and parses CSV.
+3. **rocm-smi** (`amd`) — best-effort AMD backend; parses `rocm-smi --json` for a subset of
+   metrics (index, name, utilization, memory, temperature, power).
+4. **DCGM** — deferred; not implemented in v1.
 
-`auto` prefers NVML, then falls back to `nvidia-smi`. If neither backend is
-available, commands fail gracefully with `no NVIDIA GPU detected` and exit code
-`1`. See [FAQ](docs/faq.md) for no-GPU and benchmark exit behavior.
+`auto` prefers NVML, then falls back to `nvidia-smi` (it does **not** auto-select AMD — pass
+`--backend amd` explicitly). If no requested backend is available, commands fail gracefully
+with `no NVIDIA GPU detected` and exit code `1`. See [FAQ](docs/faq.md) for no-GPU, watch,
+exporter, and benchmark exit behavior.
+
+## Exporter
+
+`gpu-tools export --listen :9835` runs a headless Prometheus exporter. Scrape `/metrics`;
+a bare `/` returns `gpu-tools exporter`. The endpoint always answers HTTP 200 — on a host
+with no GPU it emits `gpu_tools_up 0` and no device series, so a Prometheus target never
+flaps just because a node lacks a GPU.
+
+Exposed metrics:
+
+| Metric                            | Labels                        | Meaning                          |
+| --------------------------------- | ----------------------------- | -------------------------------- |
+| `gpu_tools_up`                    | —                             | 1 if backend available + read ok |
+| `gpu_utilization_percent`         | `index,uuid,name`             | GPU utilization %                |
+| `gpu_memory_used_bytes`           | `index,uuid,name`             | Used memory (bytes)              |
+| `gpu_memory_total_bytes`          | `index,uuid,name`             | Total memory (bytes)             |
+| `gpu_temperature_celsius`         | `index,uuid,name`             | Temperature (°C)                 |
+| `gpu_power_draw_watts`            | `index,uuid,name`             | Power draw (W)                   |
+| `gpu_power_limit_watts`           | `index,uuid,name`             | Power limit (W)                  |
+| `gpu_clock_graphics_mhz`          | `index,uuid,name`             | Graphics clock (MHz)             |
+| `gpu_clock_mem_mhz`               | `index,uuid,name`             | Memory clock (MHz)               |
+| `gpu_encoder_utilization_percent` | `index,uuid,name`             | Encoder utilization %            |
+| `gpu_decoder_utilization_percent` | `index,uuid,name`             | Decoder utilization %            |
+| `gpu_process_used_memory_bytes`   | `index,pid,process_name,type` | Per-process GPU memory (bytes)   |
+
+> [!NOTE]
+> All per-GPU/per-process series use the bare `gpu_` prefix; only `gpu_tools_up` carries the
+> `gpu_tools` namespace.
+
+Grafana: point a Prometheus scrape job at `<host>:9835`, then chart `gpu_utilization_percent`
+and `gpu_memory_used_bytes` by the `index`/`name` labels; use `gpu_tools_up` for target
+health and `gpu_process_used_memory_bytes` for per-process breakdowns.
 
 ## Requirements
 
@@ -128,15 +197,18 @@ command contract.
 - `gpu-tools config show` — print resolved YAML after global flag overrides.
 - `gpu-tools completion bash|zsh|fish|powershell` — generate shell completions.
 - `gpu-tools detect --output json` — emit an inventory snapshot on stdout.
+- `gpu-tools detect --watch 2s` — refresh the table each tick; with `-o json` streams NDJSON.
 - `gpu-tools report --out - --output markdown` — emit a Markdown report on stdout.
 - `gpu-tools tune --output json` — emit read-only advisory recommendations.
 - `gpu-tools bench --tool gpu-burn --duration 60s --output json` — run a supported external benchmark.
+- `gpu-tools export --listen :9835` — serve a headless Prometheus `/metrics` endpoint.
 
-Global flags: `--output/-o table|json|markdown`, `--backend auto|nvml|nvidia-smi`,
+Global flags: `--output/-o table|json|markdown`, `--backend auto|nvml|nvidia-smi|amd`,
 and `--config <path>`.
 
 Exit contract: diagnostics go to stderr, command output goes to stdout, no-GPU
-backend selection exits `1`, and missing benchmark tools exit `2`.
+backend selection exits `1` (including `detect --watch` on a GPU-less host, which
+fails fast rather than spinning), and missing benchmark tools exit `2`.
 
 </details>
 
@@ -145,7 +217,7 @@ backend selection exits `1`, and missing benchmark tools exit `2`.
 Configuration lives at `~/.gpu-tools/config.yaml` by default and supports:
 
 - `default_output`: `table`, `json`, or `markdown`
-- `backend`: `auto`, `nvml`, or `nvidia-smi`
+- `backend`: `auto`, `nvml`, `nvidia-smi`, or `amd`
 - `report_dir`: default directory for report files
 - `nvidia_smi_path`: optional `nvidia-smi` binary override
 

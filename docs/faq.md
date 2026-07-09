@@ -48,4 +48,41 @@ benchmark tool "<tool>" not installed, install it and retry
 
 ## 支持 AMD 或 Intel GPU 吗？
 
-暂不支持。v1 是 NVIDIA-only：后端为 purego NVML 和 `nvidia-smi`。AMD / Intel 后端延期。
+NVIDIA 是一等支持（purego NVML + `nvidia-smi`）。AMD 提供**尽力而为**的后端：显式
+`--backend amd` 通过 `rocm-smi --json` 读取指标子集——索引、名称、GPU / 显存利用率、显存、
+温度、功耗。它**不含**编码 / 解码利用率、PCIe 链路、时钟、功耗上限或按进程数据，这些字段
+保持 `0` / 空（见下方「AMD 后端为什么只有部分字段」）。`auto` 不会自动选择 AMD，需显式指定。
+Intel GPU 暂不支持。
+
+## `detect --watch` 在无 GPU 主机上会怎样？
+
+`gpu-tools detect --watch <duration>` 在进入刷新循环前会**急切读取一次**。如果后端永久不可用
+（无 NVML、无 `nvidia-smi`），这次首读会立即以 `no NVIDIA GPU detected` 报错并返回退出码
+`1`——**快速失败，绝不空转重试**。只有首读成功后才会按 tick 持续刷新，直到 Ctrl-C。
+
+## exporter 在无 GPU 主机上会怎样？
+
+`gpu-tools export --listen :9835` 是 headless 的 `/metrics` 端点，**始终返回 HTTP 200**。
+在无 GPU 主机上它只输出 `gpu_tools_up 0` 且无任何设备序列（不报错、不刷日志），因此
+Prometheus 目标不会仅因某节点没有 GPU 而抖动。裸 `/` 返回 `gpu-tools exporter`。真实读取
+错误也归一化为 `up 0`（错误记录到 stderr，不向 promhttp 传播）。
+
+## AMD 后端为什么只有部分字段？
+
+AMD 后端是尽力而为的：`rocm-smi --json` 暴露的字段与 NVML 不对齐，且不同 rocm-smi 版本键名
+各异。因此 AMD 后端只映射稳定可得的子集（索引、名称、利用率、显存、温度、功耗），其余 NVIDIA
+专有 / NVML 专有字段（Enc/Dec、PCIe、时钟、功耗上限、按进程占用）在 AMD 下保持 `0` / 空，而非
+猜测或伪造。
+
+## 能用它杀掉占用 GPU 的进程吗？
+
+不能。`gpu-tools` 是**只读**工具：它采集并展示按进程 GPU 占用（GPU Processes 区块 /
+`gpu_process_used_memory_bytes` 指标），但从不 kill 进程、也不修改任何硬件或系统状态。进程
+管理请用系统自带工具（`kill`、`nvidia-smi` 等）。这与 `tune` 的只读定位一致。
+
+## 为什么没有交互式 TUI？
+
+`gpu-tools` 刻意保持面向脚本 / CI / agent 的非交互形态：一次性快照、`--watch` 的清屏重绘 /
+NDJSON 流、以及 headless 的 Prometheus `/metrics`，都能被管道、日志和抓取任务直接消费。没有
+全屏交互式 TUI（无按键导航 / 菜单），以保持输出确定性、可 grep、可被 agent 驱动。需要图形化
+观测请把 exporter 接到 Grafana。
