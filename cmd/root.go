@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sunerpy/gpu-tools/core"
+	_ "github.com/sunerpy/gpu-tools/internal/gpu/amd"
 	_ "github.com/sunerpy/gpu-tools/internal/gpu/nvidiasmi"
 	_ "github.com/sunerpy/gpu-tools/internal/gpu/nvml"
 )
@@ -48,7 +49,7 @@ rendering reports, and preparing future detection, tuning, and benchmark workflo
 	}
 	cmd.PersistentFlags().StringP(outputFlag, "o", defaults.DefaultOutput, "output format: table, json, or markdown")
 	cmd.PersistentFlags().String(configFlag, defaults.ConfigPath, "path to config file")
-	cmd.PersistentFlags().String(backendFlag, defaults.Backend, "GPU backend: auto, nvml, or nvidia-smi")
+	cmd.PersistentFlags().String(backendFlag, defaults.Backend, "GPU backend: auto, nvml, nvidia-smi, or amd")
 	for _, constructor := range commandConstructors {
 		cmd.AddCommand(constructor())
 	}

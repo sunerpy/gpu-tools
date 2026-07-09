@@ -17,6 +17,7 @@ const (
 	BackendAuto      = "auto"
 	BackendNVML      = "nvml"
 	BackendNvidiaSMI = "nvidia-smi"
+	BackendAMD       = "amd"
 )
 
 type Config struct {
@@ -98,7 +99,7 @@ func isValidDefaultOutput(value string) bool {
 
 func isValidBackend(value string) bool {
 	switch value {
-	case BackendAuto, BackendNVML, BackendNvidiaSMI:
+	case BackendAuto, BackendNVML, BackendNvidiaSMI, BackendAMD:
 		return true
 	default:
 		return false

@@ -157,6 +157,18 @@ func TestConfig_Validate_returns_typed_error_when_config_is_nil(t *testing.T) {
 	}
 }
 
+func TestConfig_Validate_accepts_amd_backend(t *testing.T) {
+	// Given: a config that selects the AMD rocm-smi backend explicitly.
+	config := &Config{DefaultOutput: OutputTable, Backend: BackendAMD}
+
+	// When: the config is validated.
+	err := config.Validate()
+	// Then: amd is accepted as a known backend.
+	if err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+}
+
 func TestLoad_returns_wrapped_error_when_path_is_directory(t *testing.T) {
 	_, err := Load(t.TempDir())
 	if err == nil {
