@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and release, e.g. v1.0.0. Leave blank to run release-please only."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -13,6 +18,7 @@ permissions:
 jobs:
   release-please:
     name: Release Please
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -30,16 +36,24 @@ jobs:
   build-and-release:
     name: Build and Release
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    # Run when release-please cut a release, OR when manually dispatched with a tag.
+    if: |
+      always() &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.tag != '') ||
+        needs.release-please.outputs.release_created == 'true'
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG_NAME: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || needs.release-please.outputs.tag_name }}
 
     steps:
       - name: Checkout tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ env.TAG_NAME }}
           fetch-depth: 0
 
       - name: Set up Go
@@ -69,5 +83,4 @@ jobs:
       - name: Publish completed draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         run: gh release edit "${TAG_NAME}" --draft=false --latest
