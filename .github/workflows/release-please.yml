@@ -14,6 +14,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: read # verify-ci's `gh api` reads the CI workflow's runs + jobs
 
 jobs:
   release-please:
@@ -32,6 +33,96 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # verify-ci: gate the PUBLIC release on the SAME tag commit's CI result.
+  # Query-only (no go build/test re-run) — it polls the CI workflow's push run
+  # for the tag commit SHA and waits for its `CI Success` gate job. Runs in
+  # PARALLEL with build-and-release; the gate is enforced at publish-release
+  # (below), so a red CI blocks publish while the build overlaps the CI wait.
+  #
+  # It must always RUN (never be skipped) because publish-release lists it in
+  # `needs` — a skipped needed job cascade-skips publish-release. Hence the SAME
+  # gate as build-and-release, plus a workflow_dispatch run-and-pass no-op
+  # (a manual re-attach has no new CI run to check).
+  verify-ci:
+    name: Verify CI Passed
+    needs: release-please
+    if: |
+      always() &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.tag != '') ||
+        needs.release-please.outputs.release_created == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    env:
+      TAG_NAME: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || needs.release-please.outputs.tag_name }}
+    steps:
+      - name: Manual re-attach — skip CI gate (run-and-pass no-op)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "manual re-attach: skipping CI verification"
+
+      - name: Wait for CI Success on the tag commit
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Resolve the cut tag's commit SHA (query-only; no checkout needed).
+          head_sha=$(gh api "repos/${REPO}/commits/${TAG_NAME}" --jq '.sha')
+          if [ -z "${head_sha}" ]; then
+            echo "could not resolve commit SHA for tag ${TAG_NAME}; leaving release as draft." >&2
+            exit 1
+          fi
+          echo "Gating release on CI Success for ${TAG_NAME} (${head_sha})."
+
+          max_iters=40   # ~10 min at 15s/iter
+          sleep_secs=15
+
+          # Locate the CI workflow's push run on main for this exact SHA.
+          run_id=""
+          for i in $(seq 1 "${max_iters}"); do
+            run_id=$(gh api \
+              "repos/${REPO}/actions/runs?head_sha=${head_sha}&event=push&branch=main&per_page=100" \
+              --jq '[.workflow_runs[] | select(.name == "CI")] | sort_by(.created_at) | last | .id // empty')
+            if [ -n "${run_id}" ]; then
+              echo "Found CI run ${run_id} for ${head_sha}"
+              break
+            fi
+            echo "No CI run for ${head_sha} yet (${i}/${max_iters}); sleeping ${sleep_secs}s..."
+            sleep "${sleep_secs}"
+          done
+          if [ -z "${run_id}" ]; then
+            echo "Timed out waiting for a CI run; leaving release as draft." >&2
+            exit 1
+          fi
+
+          # Wait for the `CI Success` gate JOB to conclude; fail-closed on
+          # anything that is not a clean success or on timeout.
+          for i in $(seq 1 "${max_iters}"); do
+            status=$(gh api "repos/${REPO}/actions/runs/${run_id}/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name == "CI Success") | .status')
+            conclusion=$(gh api "repos/${REPO}/actions/runs/${run_id}/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name == "CI Success") | .conclusion // ""')
+            if [ -z "${status}" ] || [ "${status}" != "completed" ]; then
+              echo "CI Success not done (status='${status}', ${i}/${max_iters}); sleeping ${sleep_secs}s..."
+              sleep "${sleep_secs}"
+              continue
+            fi
+            if [ "${conclusion}" = "success" ]; then
+              echo "CI Success passed for ${head_sha}."
+              exit 0
+            fi
+            echo "CI Success concluded '${conclusion}'; blocking release (draft preserved)." >&2
+            exit 1
+          done
+          echo "Timed out waiting for CI Success to complete; leaving release as draft." >&2
+          exit 1
 
   build-and-release:
     name: Build and Release
@@ -80,6 +171,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  publish-release:
+    name: Publish Release
+    # verify-ci is the release GATE: a red CI blocks this job, so the built
+    # assets stay on a DRAFT release (visible + fixable) and never go public.
+    needs: [release-please, build-and-release, verify-ci]
+    if: |
+      always() &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.tag != '') ||
+        needs.release-please.outputs.release_created == 'true'
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || needs.release-please.outputs.tag_name }}
+    steps:
       - name: Publish completed draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
