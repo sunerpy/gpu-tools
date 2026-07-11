@@ -106,27 +106,21 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Install Go formatters
         run: |
           go install golang.org/x/tools/cmd/goimports@latest
           go install mvdan.cc/gofumpt@latest
 
-      - name: Run make fmt
-        run: make fmt
+      - name: Install oxfmt
+        run: npm install -g oxfmt
 
-      - name: Check for formatting changes
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::Code is not formatted. Please run 'make fmt' locally and commit the changes."
-            echo ""
-            echo "Changed files:"
-            git status --porcelain
-            echo ""
-            echo "Diff:"
-            git diff --color=always
-            exit 1
-          fi
-          echo "All code is properly formatted."
+      - name: Check formatting
+        run: make fmt-check
 
   ci-success:
     name: CI Success
