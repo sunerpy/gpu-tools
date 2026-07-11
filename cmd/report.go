@@ -17,6 +17,8 @@ import (
 
 const reportOutFlag = "out"
 
+var osHostname = os.Hostname
+
 func newReportCmd() *cobra.Command {
 	var outPath string
 	cmd := &cobra.Command{
@@ -182,7 +184,7 @@ func writeReportFile(path string, data []byte) (err error) {
 }
 
 func hostname() string {
-	host, err := os.Hostname()
+	host, err := osHostname()
 	if err != nil {
 		return ""
 	}

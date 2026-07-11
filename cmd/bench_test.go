@@ -138,6 +138,32 @@ func TestBenchCommand_returnsExitCode1_whenBenchmarkRunFails(t *testing.T) {
 	}
 }
 
+func TestBenchCommand_returnsExitCode1_whenBenchmarkReturnsNilResult(t *testing.T) {
+	// Given
+	overrideBenchRun(t, func(context.Context, bench.Tool, time.Duration) (*bench.BenchResult, error) {
+		return nil, nil
+	})
+	t.Setenv("HOME", t.TempDir())
+
+	// When
+	_, _, err := executeCommand(newRootCmd(), "bench", "--tool", "gpu-burn")
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected nil benchmark result to fail")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "returned no result") {
+		t.Fatalf("expected nil result message, got %q", err.Error())
+	}
+}
+
 func TestBenchCommand_rendersMarkdown_whenMarkdownOutputRequested(t *testing.T) {
 	// Given
 	overrideBenchRun(t, func(_ context.Context, tool bench.Tool, duration time.Duration) (*bench.BenchResult, error) {
@@ -193,6 +219,35 @@ func TestBenchRenderer_returnsError_whenOutputFormatIsUnknown(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown benchmark output format \"xml\"") {
 		t.Fatalf("expected unknown format error, got %q", err.Error())
+	}
+}
+
+func TestRenderBenchTable_returnsWriterError_whenOutputWriterFails(t *testing.T) {
+	// Given
+	result := &bench.BenchResult{Tool: "gpu-burn", Duration: time.Second, Throughput: 42.5, Unit: "GB/s", RawLog: "raw"}
+
+	// When
+	err := renderBenchTable(failingWriter{}, result)
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected writer failure")
+	}
+	if !strings.Contains(err.Error(), "writer failed") {
+		t.Fatalf("expected writer failure, got %q", err.Error())
+	}
+}
+
+func TestFormatBenchThroughput_omitsUnit_whenUnitIsEmpty(t *testing.T) {
+	// Given
+	result := &bench.BenchResult{Throughput: 12.345}
+
+	// When
+	got := formatBenchThroughput(result)
+
+	// Then
+	if got != "12.35" {
+		t.Fatalf("formatBenchThroughput = %q, want %q", got, "12.35")
 	}
 }
 
