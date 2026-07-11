@@ -93,4 +93,9 @@ chore: update release workflow
 5. GoReleaser 为 Linux、macOS、Windows 的 `amd64` / `arm64` 构建产物。
 6. git-cliff 生成 release notes，工作流发布完成的 GitHub Release。
 
+release-please 维护的仓库变更日志按主版本拆分在 `changelog/` 目录下，当前活跃系列为
+`changelog/CHANGELOG-v1.x.md`（由 `release-please-config.json` 中的 `changelog-path`
+指定）。开启新的主版本系列时，新建 `changelog/CHANGELOG-vN.x.md` 并同步更新
+`changelog-path`。这些文件由工具维护，不要手动编辑（见 `changelog/README.md`）。
+
 仓库元数据和 squash-merge 策略的手动命令记录在 [repo-metadata.md](repo-metadata.md)。

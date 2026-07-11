@@ -2,7 +2,7 @@
 # vendored, tool-owned, or explicitly outside this task's editable surface.
 
 # Tool-owned changelogs / release metadata
-CHANGELOG.md
+changelog/
 .release-please-manifest.json
 
 # Build and vendored output

@@ -24,6 +24,8 @@
     { "type": "deps", "section": "Dependencies", "hidden": true }
   ],
   "packages": {
-    ".": {}
+    ".": {
+      "changelog-path": "changelog/CHANGELOG-v1.x.md"
+    }
   }
 }
