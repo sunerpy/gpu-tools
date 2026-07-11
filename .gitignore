@@ -3,5 +3,8 @@
 .omo
 dist/
 coverage.out
+coverage.html
+coverage.filtered.out
+coverage.filtered.txt
 *.test
 RELEASE_CHANGELOG.md
