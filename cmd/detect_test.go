@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/sunerpy/gpu-tools/core"
 	"github.com/sunerpy/gpu-tools/internal/gpu"
 	"github.com/sunerpy/gpu-tools/internal/report"
@@ -149,6 +151,25 @@ func TestDetectCommand_returnsConfigError_whenRunWithoutRootFlags(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "read --config") {
 		t.Fatalf("expected config flag read error, got %q", err.Error())
+	}
+}
+
+func TestDetectCommand_returnsWatchFlagError_whenWatchFlagIsMissing(t *testing.T) {
+	// Given
+	t.Setenv("HOME", t.TempDir())
+	root := newRootCmd()
+	cmd := &cobra.Command{Use: "detect"}
+	root.AddCommand(cmd)
+
+	// When
+	err := runDetect(cmd)
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected missing watch flag to fail")
+	}
+	if !strings.Contains(err.Error(), "read --watch") {
+		t.Fatalf("expected watch flag error, got %q", err.Error())
 	}
 }
 

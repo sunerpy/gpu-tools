@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -131,6 +132,25 @@ func TestDefaultConfigPath_uses_user_home_directory(t *testing.T) {
 	want := filepath.Join(home, ".gpu-tools", "config.yaml")
 	if got != want {
 		t.Fatalf("DefaultConfigPath = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultConfigPath_returns_error_when_home_directory_is_unset(t *testing.T) {
+	// Given: os.UserHomeDir cannot resolve an empty HOME on Unix.
+	t.Setenv("HOME", "")
+
+	// When: the default config path is requested.
+	got, err := DefaultConfigPath()
+
+	// Then: the os.UserHomeDir error is wrapped and no path is returned.
+	if err == nil {
+		t.Fatal("DefaultConfigPath returned nil error")
+	}
+	if got != "" {
+		t.Fatalf("DefaultConfigPath path = %q, want empty", got)
+	}
+	if !strings.Contains(err.Error(), "user home dir") {
+		t.Fatalf("DefaultConfigPath error = %q, want user home dir", err.Error())
 	}
 }
 

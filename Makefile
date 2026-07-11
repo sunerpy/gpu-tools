@@ -35,7 +35,7 @@ help:
 	@echo "  fmt-check      Verify formatting without writing"
 	@echo "  lint           Run golangci-lint v2, fallback to go vet if missing"
 	@echo "  test           Run race tests with atomic coverage"
-	@echo "  coverage       Generate coverage.html from coverage.out"
+	@echo "  coverage       Print unfiltered and effective (filtered) coverage totals; generate coverage.html"
 	@echo "  coverage-gate  Enforce filtered total coverage >= 95%"
 	@echo "  coverage-parity Verify Codecov ignore set mirrors coverage-gate exclusions"
 	@echo "  clean          Remove build and coverage artifacts"
@@ -148,6 +148,11 @@ test:
 	CGO_ENABLED=1 go test ./... -count=1 -race -covermode=atomic -coverprofile=coverage.out
 
 coverage: test
+	@echo "=== Total coverage (unfiltered, all statements) ==="
+	@go tool cover -func=coverage.out | grep '^total:'
+	@grep -Ev '(_test\.go|/mocks/|(^|/)main\.go:|(^|/)version/|internal/gpu/nvml/purego_lib\.go)' coverage.out > coverage.filtered.out
+	@echo "=== Effective coverage (filtered: excludes _test.go, /mocks/, main.go, version/, purego_lib.go) ==="
+	@go tool cover -func=coverage.filtered.out | grep '^total:'
 	@echo "Generating coverage.html..."
 	go tool cover -html=coverage.out -o coverage.html
 

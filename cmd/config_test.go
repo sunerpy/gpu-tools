@@ -130,6 +130,22 @@ func TestConfigShow_returnsLoadError_whenConfigFileIsInvalid(t *testing.T) {
 	}
 }
 
+func TestConfigShow_returnsConfigError_whenRunWithoutRootFlags(t *testing.T) {
+	// Given
+	cmd := newConfigShowCmd()
+
+	// When
+	err := cmd.RunE(cmd, nil)
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected config show without root flags to fail")
+	}
+	if !strings.Contains(err.Error(), "read --config") {
+		t.Fatalf("expected config flag read error, got %q", err.Error())
+	}
+}
+
 func TestConfigShow_returnsWriteError_whenOutputWriterFails(t *testing.T) {
 	// Given
 	root := newRootCmd()
