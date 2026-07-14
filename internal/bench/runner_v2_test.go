@@ -102,6 +102,27 @@ func TestRunWithOptions_returnsErrToolNotInstalled_whenPerftestBinaryIsMissing(t
 	}
 }
 
+func TestRunWithOptions_returnsWrappedRunnerError_whenPerftestRunnerFails(t *testing.T) {
+	// Given
+	runErr := errors.New("ib_write_bw failed")
+	runner := &fakeExecRunnerV2{err: runErr}
+	overrideLookPath(t, func(name string) (string, error) { return "/usr/bin/" + name, nil })
+
+	// When
+	result, err := RunWithOptions(context.Background(), runner, ToolPerftest, Options{Server: "rdma-peer"})
+
+	// Then
+	if result != nil {
+		t.Fatalf("expected no result for perftest runner failure, got %#v", result)
+	}
+	if !errors.Is(err, runErr) {
+		t.Fatalf("expected wrapped runner error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "run benchmark tool perftest") {
+		t.Fatalf("expected perftest context, got %v", err)
+	}
+}
+
 func TestRunWithOptions_returnsZeroThroughput_whenPerftestOutputIsMalformed(t *testing.T) {
 	// Given
 	runner := &fakeExecRunnerV2{result: ExecResult{Stdout: []byte("benchmark completed without tabular throughput\n")}}

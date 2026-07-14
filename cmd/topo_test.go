@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/sunerpy/gpu-tools/internal/topo"
 )
 
@@ -301,4 +303,121 @@ func TestRenderTopo_returnsError_whenOutputUnknown(t *testing.T) {
 	if !strings.Contains(err.Error(), "unknown topo output format") {
 		t.Fatalf("expected unknown format error, got %q", err.Error())
 	}
+}
+
+func TestWriteTopoRows_returnsError_whenGPURowWriteFails(t *testing.T) {
+	// When: a writer that fails on the very first write cannot emit the GPU rows.
+	err := writeTopoRows(failWriter{}, sampleTopoResult())
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected GPU-row write failure to propagate")
+	}
+}
+
+func TestWriteTopoRows_returnsError_whenNICRowWriteFails(t *testing.T) {
+	// Given a writer that succeeds for both GPU rows then fails on the NIC row.
+	w := &countingFailWriter{failAfter: 2}
+
+	// When
+	err := writeTopoRows(w, sampleTopoResult())
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected NIC-row write failure to propagate")
+	}
+}
+
+func TestTopoCommand_returnsRenderError_whenOutputWriterFails(t *testing.T) {
+	// Given
+	overridePlatform(t, true, "linux")
+	overrideTopoCollect(t, func(context.Context, string) (*topo.Result, error) {
+		return sampleTopoResult(), nil
+	})
+	t.Setenv("HOME", t.TempDir())
+	root := newRootCmd()
+	root.SetOut(failWriter{})
+	root.SetArgs([]string{"topo"})
+
+	// When
+	err := root.Execute()
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected render write failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "render topo result") {
+		t.Fatalf("expected render topo error, got %q", err.Error())
+	}
+}
+
+func TestTopoCommand_returnsConfigError_whenConfigResolutionFails(t *testing.T) {
+	// Given a malformed output flag so resolvedConfig fails inside runTopo.
+	overridePlatform(t, true, "linux")
+	root := &cobra.Command{Use: "gpu-tools"}
+	child := &cobra.Command{Use: "topo"}
+	root.PersistentFlags().String(configFlag, "", "")
+	root.PersistentFlags().Bool(outputFlag, false, "")
+	root.PersistentFlags().String(backendFlag, "auto", "")
+	if err := root.PersistentFlags().Set(outputFlag, "true"); err != nil {
+		t.Fatalf("set output flag: %v", err)
+	}
+	root.AddCommand(child)
+
+	// When
+	err := runTopo(child)
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected config resolution failure")
+	}
+	if !strings.Contains(err.Error(), "read --output") {
+		t.Fatalf("expected output flag read error, got %q", err.Error())
+	}
+}
+
+func TestTopoUnsupported_returnsEncodeError_whenJSONWriterFails(t *testing.T) {
+	// Given a non-Linux platform, JSON output, and a failing stdout writer.
+	overridePlatform(t, false, "darwin")
+	root := newRootCmd()
+	root.SetOut(failWriter{})
+	root.SetArgs([]string{"--output", "json", "topo"})
+
+	// When
+	err := root.Execute()
+
+	// Then
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "encode unsupported-platform payload") {
+		t.Fatalf("expected encode error, got %q", err.Error())
+	}
+}
+
+func TestTopoCollect_defaultSeam_surfacesError_whenSMIPathInvalid(t *testing.T) {
+	// When: the default seam runs the real topo.Collect against a bogus smiPath.
+	_, err := topoCollect(context.Background(), "/nonexistent/gpu-tools-nvidia-smi-xyz")
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected default seam to surface an error for a bogus nvidia-smi path")
+	}
+}
+
+type countingFailWriter struct {
+	writes    int
+	failAfter int
+}
+
+func (w *countingFailWriter) Write(p []byte) (int, error) {
+	if w.writes >= w.failAfter {
+		return 0, errors.New("write failed after threshold")
+	}
+	w.writes++
+	return len(p), nil
 }

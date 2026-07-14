@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/sunerpy/gpu-tools/internal/health"
 )
 
@@ -302,5 +304,88 @@ func TestRenderDoctorMarkdown_returnsError_whenWriteFails(t *testing.T) {
 func TestRenderDoctorJSON_returnsError_whenWriteFails(t *testing.T) {
 	if err := renderDoctorJSON(failWriter{}, okReport()); err == nil {
 		t.Fatalf("expected json render to propagate write error")
+	}
+}
+
+func TestDoctorCommand_returnsRenderError_whenOutputWriterFails(t *testing.T) {
+	// Given
+	overridePlatform(t, true, "linux")
+	overrideHealthRun(t, func(context.Context) health.Report { return okReport() })
+	t.Setenv("HOME", t.TempDir())
+	root := newRootCmd()
+	root.SetOut(failWriter{})
+	root.SetArgs([]string{"doctor"})
+
+	// When
+	err := root.Execute()
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected render write failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "render doctor report") {
+		t.Fatalf("expected render doctor error, got %q", err.Error())
+	}
+}
+
+func TestDoctorCommand_returnsConfigError_whenConfigResolutionFails(t *testing.T) {
+	// Given a malformed output flag so resolvedConfig fails inside runDoctor.
+	overridePlatform(t, true, "linux")
+	overrideHealthRun(t, func(context.Context) health.Report {
+		t.Fatalf("healthRun must not run when config resolution fails")
+		return health.Report{}
+	})
+	root := &cobra.Command{Use: "gpu-tools"}
+	child := &cobra.Command{Use: "doctor"}
+	root.PersistentFlags().String(configFlag, "", "")
+	root.PersistentFlags().Bool(outputFlag, false, "")
+	root.PersistentFlags().String(backendFlag, "auto", "")
+	if err := root.PersistentFlags().Set(outputFlag, "true"); err != nil {
+		t.Fatalf("set output flag: %v", err)
+	}
+	root.AddCommand(child)
+
+	// When
+	err := runDoctor(child, false)
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected config resolution failure")
+	}
+	if !strings.Contains(err.Error(), "read --output") {
+		t.Fatalf("expected output flag read error, got %q", err.Error())
+	}
+}
+
+func TestDoctorUnsupported_returnsEncodeError_whenJSONWriterFails(t *testing.T) {
+	// Given a non-Linux platform, JSON output, and a failing stdout writer.
+	overridePlatform(t, false, "darwin")
+	root := newRootCmd()
+	root.SetOut(failWriter{})
+	root.SetArgs([]string{"--output", "json", "doctor"})
+
+	// When
+	err := root.Execute()
+
+	// Then
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "encode unsupported-platform payload") {
+		t.Fatalf("expected encode error, got %q", err.Error())
+	}
+}
+
+func TestHealthRun_defaultSeam_returnsReport(t *testing.T) {
+	// When the default seam runs the real probe set.
+	report := healthRun(context.Background())
+
+	// Then it produces an overall status without panicking.
+	if report.Overall == "" {
+		t.Fatalf("expected non-empty overall status from default healthRun")
 	}
 }

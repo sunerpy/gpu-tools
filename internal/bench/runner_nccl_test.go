@@ -138,6 +138,27 @@ func TestRunWithOptions_returnsErrToolNotInstalled_whenNCCLTestsBinaryIsMissing(
 	}
 }
 
+func TestRunWithOptions_returnsWrappedRunnerError_whenNCCLTestsRunnerFails(t *testing.T) {
+	// Given
+	runErr := errors.New("all_reduce_perf failed")
+	runner := &fakeExecRunnerV2{err: runErr}
+	overrideLookPath(t, func(name string) (string, error) { return "/usr/local/bin/" + name, nil })
+
+	// When
+	result, err := RunWithOptions(context.Background(), runner, ToolNCCLTests, Options{})
+
+	// Then
+	if result != nil {
+		t.Fatalf("expected no result for nccl-tests runner failure, got %#v", result)
+	}
+	if !errors.Is(err, runErr) {
+		t.Fatalf("expected wrapped runner error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "run benchmark tool nccl-tests") {
+		t.Fatalf("expected nccl-tests context, got %v", err)
+	}
+}
+
 func TestRunWithOptions_returnsZeroThroughput_whenNCCLTestsOutputIsMalformed(t *testing.T) {
 	// Given
 	runner := &fakeExecRunnerV2{result: ExecResult{Stdout: []byte("8388608 2097152 float sum 1234.5 6.79 nope 0e+00\n")}}

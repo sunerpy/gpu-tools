@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/sunerpy/gpu-tools/internal/rdma"
 )
 
@@ -337,5 +339,102 @@ func TestRenderRDMA_returnsError_whenOutputUnknown(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown rdma output format") {
 		t.Fatalf("expected unknown format error, got %q", err.Error())
+	}
+}
+
+func TestRenderRDMATable_returnsError_whenWriteFails(t *testing.T) {
+	if err := renderRDMATable(failWriter{}, sampleRDMAResult()); err == nil {
+		t.Fatalf("expected table render to propagate write error")
+	}
+}
+
+func TestRenderRDMAJSON_returnsError_whenWriteFails(t *testing.T) {
+	if err := renderRDMAJSON(failWriter{}, sampleRDMAResult()); err == nil {
+		t.Fatalf("expected json render to propagate write error")
+	}
+}
+
+func TestRDMACommand_returnsRenderError_whenOutputWriterFails(t *testing.T) {
+	// Given
+	overridePlatform(t, true, "linux")
+	overrideRDMACollect(t, func(context.Context) (*rdma.Result, error) {
+		return sampleRDMAResult(), nil
+	})
+	t.Setenv("HOME", t.TempDir())
+	root := newRootCmd()
+	root.SetOut(failWriter{})
+	root.SetArgs([]string{"rdma"})
+
+	// When
+	err := root.Execute()
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected render write failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "render rdma result") {
+		t.Fatalf("expected render rdma error, got %q", err.Error())
+	}
+}
+
+func TestRDMACommand_returnsConfigError_whenConfigResolutionFails(t *testing.T) {
+	// Given a malformed output flag so resolvedConfig fails inside runRDMA.
+	overridePlatform(t, true, "linux")
+	overrideRDMACollect(t, func(context.Context) (*rdma.Result, error) {
+		t.Fatalf("rdmaCollect must not run when config resolution fails")
+		return nil, nil
+	})
+	root := &cobra.Command{Use: "gpu-tools"}
+	child := &cobra.Command{Use: "rdma"}
+	root.PersistentFlags().String(configFlag, "", "")
+	root.PersistentFlags().Bool(outputFlag, false, "")
+	root.PersistentFlags().String(backendFlag, "auto", "")
+	if err := root.PersistentFlags().Set(outputFlag, "true"); err != nil {
+		t.Fatalf("set output flag: %v", err)
+	}
+	root.AddCommand(child)
+
+	// When
+	err := runRDMA(child)
+
+	// Then
+	if err == nil {
+		t.Fatalf("expected config resolution failure")
+	}
+	if !strings.Contains(err.Error(), "read --output") {
+		t.Fatalf("expected output flag read error, got %q", err.Error())
+	}
+}
+
+func TestRDMAUnsupported_returnsEncodeError_whenJSONWriterFails(t *testing.T) {
+	// Given a non-Linux platform, JSON output, and a failing stdout writer.
+	overridePlatform(t, false, "darwin")
+	root := newRootCmd()
+	root.SetOut(failWriter{})
+	root.SetArgs([]string{"--output", "json", "rdma"})
+
+	// When
+	err := root.Execute()
+
+	// Then
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "encode unsupported-platform payload") {
+		t.Fatalf("expected encode error, got %q", err.Error())
+	}
+}
+
+func TestRDMACollect_defaultSeam_surfacesError_whenToolsMissing(t *testing.T) {
+	// When the default seam runs the real rdma.Collect without ibv_devinfo/ibstat.
+	_, err := rdmaCollect(context.Background())
+
+	// Then it returns an error rather than panicking (tools absent in CI).
+	if err == nil {
+		t.Skip("rdma tools unexpectedly present in this environment")
 	}
 }

@@ -157,6 +157,90 @@ func TestParse(t *testing.T) {
 	})
 }
 
+func TestFirstNonEmptyLine_returnsMinusOne_whenAllLinesBlank(t *testing.T) {
+	// Given only blank/whitespace lines.
+	lines := []string{"", "   ", "\t", "  \t  "}
+
+	// When
+	got := firstNonEmptyLine(lines)
+
+	// Then
+	if got != -1 {
+		t.Fatalf("firstNonEmptyLine(all blank) = %d, want -1", got)
+	}
+}
+
+func TestFirstNonEmptyLine_returnsIndexOfFirstNonBlankLine(t *testing.T) {
+	// Given a leading run of blank lines before real content.
+	lines := []string{"", "  ", "GPU0"}
+
+	// When
+	got := firstNonEmptyLine(lines)
+
+	// Then
+	if got != 2 {
+		t.Fatalf("firstNonEmptyLine = %d, want 2", got)
+	}
+}
+
+func TestParseCell_classifiesEveryLinkToken(t *testing.T) {
+	cases := []struct {
+		name  string
+		token string
+		want  Cell
+	}{
+		{name: "self via X", token: " X ", want: Cell{Type: LinkSelf}},
+		{name: "PIX", token: "PIX", want: Cell{Type: LinkPIX}},
+		{name: "PXB", token: "PXB", want: Cell{Type: LinkPXB}},
+		{name: "PHB", token: "PHB", want: Cell{Type: LinkPHB}},
+		{name: "NODE", token: "NODE", want: Cell{Type: LinkNODE}},
+		{name: "SYS", token: "SYS", want: Cell{Type: LinkSYS}},
+		{name: "NVLink with lanes", token: "NV12", want: Cell{Type: LinkNVLink, Lanes: 12}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// When
+			got, err := parseCell(tc.token)
+			// Then
+			if err != nil {
+				t.Fatalf("parseCell(%q) returned error: %v", tc.token, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseCell(%q) = %+v, want %+v", tc.token, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseCell_returnsError_whenNVLinkLaneCountOverflows(t *testing.T) {
+	// Given an NV token whose lane count overflows a machine int.
+	token := "NV" + strings.Repeat("9", 400)
+
+	// When
+	_, err := parseCell(token)
+
+	// Then
+	if err == nil {
+		t.Fatalf("parseCell(%q) = nil error, want overflow error", token)
+	}
+	if !strings.Contains(err.Error(), "nvlink lane count") {
+		t.Fatalf("parseCell(%q) error = %q, want nvlink lane count error", token, err.Error())
+	}
+}
+
+func TestParseCell_returnsError_whenTokenIsUnknown(t *testing.T) {
+	// When
+	_, err := parseCell("WAT")
+
+	// Then
+	if err == nil {
+		t.Fatalf("parseCell(unknown) = nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "unknown link type") {
+		t.Fatalf("parseCell(unknown) error = %q, want unknown link type error", err.Error())
+	}
+}
+
 func TestParse_errors(t *testing.T) {
 	cases := []struct {
 		name string
