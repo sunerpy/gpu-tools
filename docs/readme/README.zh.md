@@ -37,8 +37,19 @@
 - **Prometheus exporter**：`gpu-tools export --listen :9835` 暴露一个无界面的 `/metrics`
   端点，供抓取和 Grafana 仪表盘使用。
 - **AMD 后端（尽力而为）**：`--backend amd` 通过 `rocm-smi` 读取指标子集；`auto` 仍优先 NVIDIA。
+- **拓扑**：`gpu-tools topo` 解析 `nvidia-smi topo -m`，渲染 GPU/NIC 连接矩阵，并给出按
+  NIC 的 GPU 亲和性建议。
+- **Doctor**：`gpu-tools doctor` 运行只读的环境健康检查（驱动、`nvidia_peermem`、
+  IOMMU、PCIe ACS、RDMA 端口 / link layer）。
+- **RDMA 清单**：`gpu-tools rdma` 通过 `ibv_devinfo`/`ibstat` 列出 RDMA 设备、端口、
+  速率和 link layer（InfiniBand 还是 RoCE）。
+- **前置依赖检测**：`gpu-tools prereqs` 检测各前置外部工具，并打印按发行版区分的
+  安装指引。
+- **RDMA / NCCL 基准**：`gpu-tools bench` 新增 `--tool perftest`（`ib_write_bw`）和
+  `--tool nccl-tests`（`all_reduce_perf`）。
 
 Collector 模型和包布局见[架构说明](../architecture.md)。
+每个诊断命令依赖的外部工具见[前置依赖说明](../prerequisites.md)。
 
 ## 安装
 
@@ -110,6 +121,35 @@ gpu-tools export --listen :9835
 gpu-tools --backend amd detect
 ```
 
+### 诊断与基准测试
+
+`topo`、`doctor`、`rdma`、`prereqs` 仅支持 Linux：在 macOS 或 Windows 上会以
+退出码 `2` 报 "requires Linux"，不会真正执行。
+
+```bash
+# GPU/NIC 连接矩阵和亲和性建议。
+gpu-tools topo
+
+# 只读环境健康检查；即使有发现项，默认也返回退出码 0。
+gpu-tools doctor
+
+# 同样的检查，但任何一项 FAIL 时返回退出码 1（用于 CI 门禁）。
+gpu-tools doctor --strict
+
+# RDMA 设备、端口、速率和 link layer（InfiniBand 还是 RoCE）。
+gpu-tools rdma
+
+# 检测前置工具（nvidia-smi、ibv_devinfo、ibstat、perftest、nccl-tests、dcgmi），
+# 并为缺失项打印安装指引。
+gpu-tools prereqs
+
+# 通过 perftest 的 ib_write_bw 做 RDMA 带宽基准；必须传 --server。
+gpu-tools bench --tool perftest --server 10.0.0.2 --use-cuda 0
+
+# 通过 nccl-tests 的 all_reduce_perf 做 NCCL 集合通信带宽基准，仅支持单机。
+gpu-tools bench --tool nccl-tests --gpus 8 --nccl-debug
+```
+
 常用全局参数：
 
 ```bash
@@ -170,7 +210,11 @@ Grafana：将 Prometheus 抓取任务指向 `<host>:9835`，再按 `index`/`name
 - 真实 GPU 数据需要主机安装 NVIDIA Driver，并可访问 NVML 或 `nvidia-smi`。
 - 二进制本身是纯 Go，并以 `CGO_ENABLED=0` 构建；构建无需 C 工具链，在无 NVIDIA GPU 的主机上也能启动。
 - purego NVML 后端通过系统动态加载器在运行时 `dlopen` NVML，因此并非完全静态链接；真实 GPU 数据仍需要系统加载器和 NVIDIA Driver，纯 musl（Alpine）不支持 NVML 后端（可回退 `nvidia-smi`）。
-- 基准测试依赖外部工具（`gpu-burn`、`nvbandwidth` 或 `bandwidthTest`）；部分工具可能需要更高权限。
+- 基准测试依赖外部工具（`gpu-burn`、`nvbandwidth`、`bandwidthTest`、`perftest` 或
+  `nccl-tests`）；部分工具可能需要更高权限。
+- `topo`、`doctor`、`rdma`、`prereqs` 仅支持 Linux；每个命令都封装了一个 gpu-tools
+  不会自行打包的外部工具（`nvidia-smi`、`lspci`、`ibv_devinfo`、`ibstat`）。见
+  [前置依赖说明](../prerequisites.md)。
 
 ## LLM / Agent 使用
 
@@ -188,13 +232,22 @@ Grafana：将 Prometheus 抓取任务指向 `<host>:9835`，再按 `index`/`name
 - `gpu-tools report --out - --output markdown`：在 stdout 输出 Markdown 报告。
 - `gpu-tools tune --output json`：输出只读建议。
 - `gpu-tools bench --tool gpu-burn --duration 60s --output json`：运行受支持的外部基准工具。
+- `gpu-tools bench --tool perftest --server <ip> --use-cuda 0`：运行 `ib_write_bw`；必须传 `--server`。
+- `gpu-tools bench --tool nccl-tests --gpus 8 --nccl-debug`：运行 `all_reduce_perf`，仅支持单机。
 - `gpu-tools export --listen :9835`：暴露一个无界面的 Prometheus `/metrics` 端点。
+- `gpu-tools topo --output json`：输出 GPU/NIC 连接矩阵和亲和性建议。仅支持 Linux。
+- `gpu-tools doctor --output json`：输出只读健康检查结果；即使有发现项，默认也返回退出码 `0`。
+- `gpu-tools doctor --strict`：任意一项检查状态为 FAIL 时返回退出码 `1`（warn 不会触发）。仅支持 Linux。
+- `gpu-tools rdma --output json`：输出 RDMA 设备 / 端口 / 速率 / link layer。仅支持 Linux。
+- `gpu-tools prereqs --output json`：输出前置工具检测结果与安装指引。仅支持 Linux。
 
 全局参数：`--output/-o table|json|markdown`、`--backend auto|nvml|nvidia-smi|amd`、
 `--config <path>`。
 
 退出契约：诊断信息写入 stderr，命令输出写入 stdout；无 GPU 后端返回 `1`（包括
 `detect --watch` 在无 GPU 主机上会快速失败而非空转），缺少基准工具返回 `2`。
+`topo`、`doctor`、`rdma`、`prereqs` 仅支持 Linux，在其他系统上或所需外部工具缺失时
+都返回退出码 `2`；`doctor` 即使检查失败默认仍返回退出码 `0`（CI 门禁请用 `--strict`）。
 
 </details>
 
@@ -206,6 +259,9 @@ Grafana：将 Prometheus 抓取任务指向 `<host>:9835`，再按 `index`/`name
 - `backend`：`auto`、`nvml`、`nvidia-smi` 或 `amd`
 - `report_dir`：报告文件默认目录
 - `nvidia_smi_path`：可选的 `nvidia-smi` 二进制路径覆盖
+
+`gpu-tools topo` 复用 `nvidia_smi_path`（无新增配置字段）；`topo`、`doctor`、`rdma`、
+`prereqs`、`bench` 都遵循全局的 `--output`/`--backend` 参数。
 
 字段、参数覆盖、后端选择和报告输出规则见[配置说明](../configuration.md)。
 
