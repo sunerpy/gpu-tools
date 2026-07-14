@@ -738,7 +738,6 @@ func TestBenchCommand_regressionLegacyTool_notPlatformGated_whenNotLinux(t *test
 
 	// When
 	stdout, _, err := executeCommand(newRootCmd(), "bench", "--tool", "gpu-burn", "--duration", "5s")
-
 	// Then
 	if err != nil {
 		t.Fatalf("expected legacy gpu-burn to run on non-Linux: %v", err)

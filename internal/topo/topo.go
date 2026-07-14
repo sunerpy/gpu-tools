@@ -44,7 +44,7 @@ type Matrix struct {
 	NICs  []NICAffinity
 }
 
-// Rating summarizes how favourable a GPU-NIC link is.
+// Rating summarizes how favorable a GPU-NIC link is.
 type Rating string
 
 const (

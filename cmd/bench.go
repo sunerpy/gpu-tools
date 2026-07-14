@@ -74,7 +74,7 @@ func runBench(cmd *cobra.Command, flags *benchFlags) error {
 	if !bench.IsKnownTool(tool) {
 		return fmt.Errorf("unknown benchmark tool %q", flags.tool)
 	}
-	if err := validateBenchFlags(cmd, tool); err != nil {
+	if err = validateBenchFlags(cmd, tool); err != nil {
 		return err
 	}
 	if tool == bench.ToolPerftest || tool == bench.ToolNCCLTests {
