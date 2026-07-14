@@ -41,8 +41,20 @@
   `/metrics` endpoint for scraping and Grafana dashboards.
 - **AMD backend (best-effort)** — `--backend amd` reads a subset of metrics via
   `rocm-smi`; `auto` still prefers NVIDIA.
+- **Topology** — `gpu-tools topo` renders the GPU/NIC connectivity matrix from
+  `nvidia-smi topo -m`, plus per-NIC GPU affinity advice.
+- **Doctor** — `gpu-tools doctor` runs read-only environment health checks
+  (driver, `nvidia_peermem`, IOMMU, PCIe ACS, RDMA ports/link layer).
+- **RDMA inventory** — `gpu-tools rdma` lists RDMA devices, ports, rates, and
+  link layer (InfiniBand vs. RoCE) via `ibv_devinfo`/`ibstat`.
+- **Prerequisites check** — `gpu-tools prereqs` detects prerequisite external
+  tools and prints distro-aware install guidance.
+- **RDMA/NCCL benchmarks** — `gpu-tools bench` extends to `--tool perftest`
+  (`ib_write_bw`) and `--tool nccl-tests` (`all_reduce_perf`).
 
 See [Architecture](docs/architecture.md) for the collector model and package layout.
+See [Prerequisites](docs/prerequisites.md) for the external tools each diagnostic
+command relies on.
 
 ## Install
 
@@ -115,6 +127,35 @@ gpu-tools export --listen :9835
 gpu-tools --backend amd detect
 ```
 
+### Diagnostics & benchmarking
+
+`topo`, `doctor`, `rdma`, and `prereqs` are Linux-only: on macOS or Windows they
+exit `2` with a "requires Linux" message instead of running.
+
+```bash
+# GPU/NIC connectivity matrix and affinity advice.
+gpu-tools topo
+
+# Read-only environment health checks; exits 0 even with findings.
+gpu-tools doctor
+
+# Same checks, but exit 1 if any check FAILs (for CI gating).
+gpu-tools doctor --strict
+
+# RDMA devices, ports, rates, and link layer (InfiniBand vs. RoCE).
+gpu-tools rdma
+
+# Detect prerequisite tools (nvidia-smi, ibv_devinfo, ibstat, perftest,
+# nccl-tests, dcgmi) and print install guidance for missing ones.
+gpu-tools prereqs
+
+# RDMA bandwidth benchmark via perftest's ib_write_bw; --server is required.
+gpu-tools bench --tool perftest --server 10.0.0.2 --use-cuda 0
+
+# NCCL collective bandwidth via nccl-tests' all_reduce_perf, single-node only.
+gpu-tools bench --tool nccl-tests --gpus 8 --nccl-debug
+```
+
 Common global flags:
 
 ```bash
@@ -181,8 +222,12 @@ health and `gpu_process_used_memory_bytes` for per-process breakdowns.
 - The purego NVML backend loads NVML via the system dynamic loader at runtime,
   so the binary is not fully static and requires the system loader plus an
   NVIDIA driver for real GPU data.
-- Benchmarks use external tools (`gpu-burn`, `nvbandwidth`, or `bandwidthTest`);
-  some tools may require elevated privileges depending on the environment.
+- Benchmarks use external tools (`gpu-burn`, `nvbandwidth`, `bandwidthTest`,
+  `perftest`, or `nccl-tests`); some tools may require elevated privileges
+  depending on the environment.
+- `topo`, `doctor`, `rdma`, and `prereqs` require Linux; each wraps an external
+  tool (`nvidia-smi`, `lspci`, `ibv_devinfo`, `ibstat`) that gpu-tools does not
+  bundle. See [Prerequisites](docs/prerequisites.md).
 
 ## Using with an LLM or agent
 
@@ -201,14 +246,24 @@ command contract.
 - `gpu-tools report --out - --output markdown` — emit a Markdown report on stdout.
 - `gpu-tools tune --output json` — emit read-only advisory recommendations.
 - `gpu-tools bench --tool gpu-burn --duration 60s --output json` — run a supported external benchmark.
+- `gpu-tools bench --tool perftest --server <ip> --use-cuda 0` — run `ib_write_bw`; `--server` is required.
+- `gpu-tools bench --tool nccl-tests --gpus 8 --nccl-debug` — run `all_reduce_perf`, single-node only.
 - `gpu-tools export --listen :9835` — serve a headless Prometheus `/metrics` endpoint.
+- `gpu-tools topo --output json` — emit the GPU/NIC connectivity matrix and affinity advice. Linux only.
+- `gpu-tools doctor --output json` — emit read-only health-check results; default exits `0` even with findings.
+- `gpu-tools doctor --strict` — exit `1` if any check has status FAIL (warn never fails). Linux only.
+- `gpu-tools rdma --output json` — emit RDMA devices/ports/rates/link layer. Linux only.
+- `gpu-tools prereqs --output json` — emit prerequisite-tool detection + install hints. Linux only.
 
 Global flags: `--output/-o table|json|markdown`, `--backend auto|nvml|nvidia-smi|amd`,
 and `--config <path>`.
 
 Exit contract: diagnostics go to stderr, command output goes to stdout, no-GPU
 backend selection exits `1` (including `detect --watch` on a GPU-less host, which
-fails fast rather than spinning), and missing benchmark tools exit `2`.
+fails fast rather than spinning), and missing benchmark tools exit `2`. `topo`,
+`doctor`, `rdma`, and `prereqs` are Linux-only and exit `2` on any other OS or
+when their required external tool is missing; `doctor` still exits `0` by
+default even when checks fail (use `--strict` for CI gating).
 
 </details>
 
@@ -220,6 +275,9 @@ Configuration lives at `~/.gpu-tools/config.yaml` by default and supports:
 - `backend`: `auto`, `nvml`, `nvidia-smi`, or `amd`
 - `report_dir`: default directory for report files
 - `nvidia_smi_path`: optional `nvidia-smi` binary override
+
+`gpu-tools topo` reuses `nvidia_smi_path` (no new config keys); `topo`, `doctor`,
+`rdma`, `prereqs`, and `bench` all honor the global `--output`/`--backend` flags.
 
 See [Configuration](docs/configuration.md) for field details, flag overrides,
 backend selection, and report output rules.

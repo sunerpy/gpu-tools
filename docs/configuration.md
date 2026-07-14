@@ -93,6 +93,16 @@ gpu-tools --backend amd report --out -
 - 找不到 `rocm-smi` 时以 `no NVIDIA GPU detected` 报错并返回退出码 `1`（后端不可用的统一路径）。
 - `auto` **不会**自动选择 AMD（NVML `10` → nvidia-smi `20` → amd `30`），需显式 `--backend amd`。
 
+## 新命令与配置的关系（`topo` / `doctor` / `rdma` / `prereqs` / `bench`）
+
+这些命令没有引入任何新配置字段：
+
+- `gpu-tools topo` 复用现有的 `nvidia_smi_path`（与 nvidia-smi 后端共用同一路径覆盖）。
+- `topo`、`doctor`、`rdma`、`prereqs`、`bench` 都遵循全局的 `--output/-o` 和 `--backend`
+  参数（`--backend` 目前只影响 GPU Collector 相关命令，这些新命令本身不选择 Collector
+  后端）。
+- `doctor`、`rdma`、`prereqs` 不读取 `nvidia_smi_path`（它们不调用 nvidia-smi）。
+
 ## 后端选择
 
 `backend: auto` 按注册优先级选择后端：
