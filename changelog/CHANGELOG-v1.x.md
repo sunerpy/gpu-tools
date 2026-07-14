@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0](https://github.com/sunerpy/gpu-tools/compare/v1.0.0...v1.1.0) (2026-07-14)
+
+
+### Features
+
+* **cmd:** add topo/doctor/rdma/prereqs commands and perftest/nccl-tests benchmarks ([#9](https://github.com/sunerpy/gpu-tools/issues/9)) ([52b0277](https://github.com/sunerpy/gpu-tools/commit/52b0277259a7362e402aad7a1c38cc3a8e145007))
+
+
+### Bug Fixes
+
+* **ci:** gitignore RELEASE_CHANGELOG.md so GoReleaser dirty check passes ([b47aef6](https://github.com/sunerpy/gpu-tools/commit/b47aef62aa0443475dc7a017f93494dfc2cb63f6))
+* **ci:** publish the asset-bearing release and prune duplicate empty drafts ([f0f3be0](https://github.com/sunerpy/gpu-tools/commit/f0f3be051792a1711e67e6d3401c59497edfe0e1))
+* **ci:** write git-cliff release notes to runner.temp so GoReleaser dirty check passes against the tag tree ([204deb7](https://github.com/sunerpy/gpu-tools/commit/204deb7a906521e15af79afbf2c033f9a712f728))
+
 ## 1.0.0 (2026-07-09)
 
 
