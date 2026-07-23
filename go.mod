@@ -3,7 +3,7 @@ module github.com/sunerpy/gpu-tools
 go 1.26.5
 
 require (
-	github.com/ebitengine/purego v0.10.1
+	github.com/ebitengine/purego v0.10.2
 	github.com/golang/mock v1.6.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2
